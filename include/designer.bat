@@ -1,0 +1,1 @@
+c:\Program Files (x86)\Qt Designer\designer.exe
