@@ -167,7 +167,8 @@ int LoadFlashProg(TCHAR* mprgFile) {
             return status;
         status = sh.ConnectToDevice(true, 0);
         if (status != ERROR_SUCCESS)
-            return status;
+            // return status;
+            LWARN("LoadFlashProg", "通过Sahara协议连接设备出错（可能是Hello包已经被接走），将会尝试继续");
         // wprintf(L"Downloading flash programmer: %ls\n", mprgFile);
         LINFO("LoadFlashProg", "正在下载烧录内核，文件来源: \"%s\"", string_utils::wstr2str(mprgFile).c_str());
         status = sh.LoadFlashProg(mprgFile);
@@ -210,8 +211,8 @@ int EraseDisk(uint64_t start, uint64_t num, int dnum, TCHAR* szPartName) {
 
         status = dw.OpenDevice(dnum);
         if (status == ERROR_SUCCESS) {
-            wprintf(L"Successfully opened volume\n");
-            wprintf(L"Erase at start_sector %lld: num_sectors: %lld\n", start, num);
+            LINFO("EraseDisk", "成功打开卷");
+            LDEBUG("EraseDisk", "擦除起始扇区: %lld, 扇区数: %lld", start, num);
             status = dw.WipeDiskContents(start, num, szPartName);
         }
         dw.CloseDevice();
@@ -226,16 +227,14 @@ int DumpDeviceInfo(void) {
         pbl_info_t pbl_info;
         status = sh.DumpDeviceInfo(&pbl_info);
         if (status == ERROR_SUCCESS) {
-            wprintf(L"SerialNumber: 0x%08x\n", pbl_info.serial);
-            wprintf(L"MSM_HW_ID: 0x%08x\n", pbl_info.msm_id);
-            wprintf(L"OEM_PK_HASH: 0x");
-            for (int i = 0; i < sizeof(pbl_info.pk_hash); i++) {
-                wprintf(L"%02x", pbl_info.pk_hash[i]);
-            }
-            wprintf(L"\nSBL SW Version: 0x%08x\n", pbl_info.pbl_sw);
+            LINFO("GetInfo", "序列号: 0x%08x", pbl_info.serial);
+            LINFO("GetInfo", "MSM硬件ID: 0x%08x", pbl_info.msm_id);
+            string hash_str((char*) pbl_info.pk_hash, 32);
+            LINFO("GetInfo", "OEM公钥哈希: 0x%s", hash_str.c_str());
+            LINFO("GetInfo", "\nSBL软件版本: 0x%08x", pbl_info.pbl_sw);
         }
     } else {
-        wprintf(L"Only devices with Sahara support this information\n");
+        LWARN("GetInfo", "只有支持Sahara协议的设备才能获取此信息");
         status = ERROR_INVALID_PARAMETER;
     }
 
@@ -252,8 +251,8 @@ int WipeDisk(int dnum) {
 
     status = dw.OpenDevice(dnum);
     if (status == ERROR_SUCCESS) {
-        wprintf(L"Successfully opened volume\n");
-        wprintf(L"Wipping GPT and MBR\n");
+        LINFO("WipeDisk", "成功打开卷");
+        LINFO("WipeDisk", "正在擦除GPT和MBR");
         status = dw.WipeLayout();
     }
     dw.CloseDevice();
@@ -273,7 +272,7 @@ int CreateGPP(DWORD dwGPP1, DWORD dwGPP2, DWORD dwGPP3, DWORD dwGPP4) {
         status = dl.OpenPartition(PRTN_EMMCUSER);
         if (status != ERROR_SUCCESS)
             return status;
-        wprintf(L"Connected to flash programmer, creating GPP\n");
+        LINFO("CreateGPP", "连接到烧录内核，开始创建GPP分区");
         status = dl.CreateGPP(dwGPP1, dwGPP2, dwGPP3, dwGPP4);
     } else if (m_protocol == FIREHOSE_PROTOCOL) {
         Firehose fh(&m_port);
@@ -283,7 +282,7 @@ int CreateGPP(DWORD dwGPP1, DWORD dwGPP2, DWORD dwGPP3, DWORD dwGPP4) {
         status = fh.ConnectToFlashProg(&m_cfg);
         if (status != ERROR_SUCCESS)
             return status;
-        wprintf(L"Connected to flash programmer, creating GPP\n");
+        LINFO("CreateGPP", "连接到烧录内核，开始创建GPP分区");
         status = fh.CreateGPP(dwGPP1 / 2, dwGPP2 / 2, dwGPP3 / 2, dwGPP4 / 2);
         status = fh.SetActivePartition(1);
     }
@@ -303,7 +302,7 @@ int ReadGPT(int dnum) {
         if (status != ERROR_SUCCESS)
             return status;
         // wprintf(L"Connected to flash programmer, starting download\n");
-        wprintf(L"连接到烧录内核，开始读取分区表\n");
+        LINFO("ReadGPT", "连接到烧录内核，开始读取分区表");
         fh.ReadGPT(true);
     } else {
         DiskWriter dw;
@@ -362,11 +361,11 @@ int FFUProgram(TCHAR* szFFUFile) {
     status = fh.ConnectToFlashProg(&m_cfg);
     if (status != ERROR_SUCCESS)
         return status;
-    wprintf(L"Trying to open FFU\n");
+    LINFO("DownloadFFU", "正在尝试打开FFU文件");
     status = ffu.PreLoadImage(szFFUFile);
     if (status != ERROR_SUCCESS)
         return status;
-    wprintf(L"Valid FFU found trying to program image\n");
+    LINFO("DownloadFFU", "找到有效的FFU文件，开始编程镜像");
     status = ffu.ProgramImage(&fh, 0);
     ffu.CloseFFUFile();
     return status;
@@ -374,7 +373,7 @@ int FFUProgram(TCHAR* szFFUFile) {
 
 int FFULoad(TCHAR* szFFUFile, TCHAR* szPartName, TCHAR* szOutputFile) {
     int status = ERROR_SUCCESS;
-    wprintf(_T("Loading FFU\n"));
+    LINFO("SplitFFU", "正在加载FFU文件");
     if ((szFFUFile != NULL) && (szOutputFile != NULL)) {
         FFUImage ffu;
         ffu.SetDiskSectorSize(m_sector_size);
@@ -390,7 +389,7 @@ int FFULoad(TCHAR* szFFUFile, TCHAR* szPartName, TCHAR* szOutputFile) {
 
 int FFURawProgram(TCHAR* szFFUFile, TCHAR* szOutputFile) {
     int status = ERROR_SUCCESS;
-    wprintf(_T("Creating rawprogram and files\n"));
+    LINFO("SplitFFU", "正在创建rawprogram和文件");
     if ((szFFUFile != NULL) && (szOutputFile != NULL)) {
         FFUImage ffu;
         ffu.SetDiskSectorSize(m_sector_size);
@@ -437,7 +436,7 @@ int EDownloadProgram(TCHAR* szSingleImage, TCHAR** szXMLFile) {
                 if (sptr == NULL)
                     return ERROR_INVALID_PARAMETER;
                 prtn = (BYTE) ((*--sptr) - '0' + PRTN_EMMCUSER);
-                wprintf(L"Opening partition %d\n", prtn);
+                LDEBUG("SetActivePartition", "正在打开分区 %d", prtn);
                 dl.OpenPartition(prtn);
                 // Sleep(1);
                 status = dl.WriteRawProgramFile(szPatchFile);
@@ -445,7 +444,7 @@ int EDownloadProgram(TCHAR* szSingleImage, TCHAR** szXMLFile) {
                     return status;
                 status = dl.WriteRawProgramFile(szXMLFile[i]);
             }
-            wprintf(L"Setting Active partition to %d\n", (prtn - PRTN_EMMCUSER));
+            LINFO("SetActivePartition", "设置活动分区为 %d", (prtn - PRTN_EMMCUSER));
             dl.SetActivePartition();
             dl.DeviceReset();
             dl.ClosePartition();
@@ -506,7 +505,7 @@ int RawDiskProgram(TCHAR** pFile, TCHAR* oFile, uint64_t dnum) {
         status = dw.OpenDevice(disk);
     }
     if (status == ERROR_SUCCESS) {
-        wprintf(L"Successfully opened disk\n");
+        LINFO("ListDevices", "成功打开磁盘");
         for (int i = 0; pFile[i] != NULL; i++) {
             Partition p(dw.GetNumDiskSectors());
             status = p.PreLoadImage(pFile[i]);
@@ -529,11 +528,11 @@ int RawDiskTest(int dnum, uint64_t offset) {
     dw.InitDiskList();
     status = dw.OpenDevice(dnum);
     if (status == ERROR_SUCCESS) {
-        wprintf(L"Successfully opened volume\n");
+        LINFO("DumpPartition", "成功打开卷");
         // status = dw.CorruptionTest(offset);
         status = dw.DiskTest(offset);
     } else {
-        wprintf(L"Failed to open volume\n");
+        LERROR("DumpPartition", "打开卷失败");
     }
 
     dw.CloseDevice();
@@ -976,7 +975,7 @@ int emmcdl_main(int argc, TCHAR* argv[]) {
             break;
 
         case EMMC_CMD_ERASE:
-            wprintf(_T("Erasing Disk\n"));
+            LINFO("EraseDisk", "正在擦除磁盘");
             status = EraseDisk(uiStartSector, uiNumSectors, dnum, szPartName);
             break;
 
@@ -1000,13 +999,13 @@ int emmcdl_main(int argc, TCHAR* argv[]) {
             if (m_emergency) {
                 status = EDownloadProgram(szSingleImage, szXMLFile);
             } else {
-                wprintf(_T("Programming image\n"));
+                LINFO("ProgramImage", "正在编程镜像");
                 status = RawDiskProgram(szXMLFile, szOutputFile, dnum);
             }
             break;
 
         case EMMC_CMD_WIPE:
-            wprintf(_T("Wipping Disk\n"));
+            LINFO("WipeDisk", "正在擦除磁盘");
             if (dnum > 0) {
                 status = WipeDisk(dnum);
             }
@@ -1019,7 +1018,7 @@ int emmcdl_main(int argc, TCHAR* argv[]) {
             break;
 
         case EMMC_CMD_TEST:
-            wprintf(_T("Running performance tests disk %d\n"), dnum);
+            LINFO("PerformanceTest", "正在运行性能测试，磁盘 %d", dnum);
             status = RawDiskTest(dnum, uiOffset);
             break;
 

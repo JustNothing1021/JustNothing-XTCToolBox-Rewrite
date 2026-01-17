@@ -2,7 +2,7 @@
 #include "emmcdl_new/crc.h"
 #include "utils/logger.h"
 #include "utils/string_utils.h"
-#include "emmcdl/utils.h"
+#include "emmcdl_new/utils.h"
 
 using namespace std;
 
@@ -20,13 +20,13 @@ XMLParser::~XMLParser() {
     if (xmlStart) free(xmlStart);
 }
 
-int XMLParser::LoadXML(TCHAR* fname) {
+int XMLParser::LoadXML(char* fname) {
     HANDLE hXML;
     int status = ERROR_SUCCESS;
     xmlStart = NULL;
 
     // Open the XML file and read into RAM
-    hXML = CreateFile(fname,
+    hXML = CreateFileA(fname,
         GENERIC_READ,
         FILE_SHARE_READ,
         NULL,
@@ -37,8 +37,8 @@ int XMLParser::LoadXML(TCHAR* fname) {
     if (hXML == INVALID_HANDLE_VALUE) {
         int err_stat = GetLastError();
         LERROR("XMLParser::LoadXML", "无法打开XML文件 \"%s\"，状态: %s",
-            string_utils::wstr2str(fname).c_str(),
-            string_utils::wstr2str(getErrorDescription(err_stat)).c_str());
+            fname,
+            getErrorDescription(err_stat).c_str());
         return err_stat;
     }
 
@@ -67,8 +67,8 @@ int XMLParser::LoadXML(TCHAR* fname) {
             status = GetLastError();
             CloseHandle(hXML);
             LERROR("XMLParser::LoadXML", "读取XML文件 \"%s\" 时发生错误，状态: %s",
-                string_utils::wstr2str(fname).c_str(),
-                string_utils::wstr2str(getErrorDescription(status)).c_str());
+                fname,
+                getErrorDescription(status).c_str());
         }
     }
 
@@ -102,7 +102,7 @@ int XMLParser::LoadXML(std::string fname) {
         status = errno_val;
         LERROR("XMLParser::LoadXML", "无法打开XML文件 \"%s\"，状态: %s",
             fname.c_str(),
-            string_utils::wstr2str(getErrorDescription(status)).c_str());
+            getErrorDescription(status).c_str());
     }
     return status;
 }
@@ -174,11 +174,8 @@ char* XMLParser::StringReplace(char* inp, const char* find, const char* rep) {
 
 string XMLParser::StringReplace(const string& inp, const string& find, const string& rep) {
     string result = inp;
-    while (true) {
-        size_t pos = result.find(find);
-        if (pos == string::npos) return result;
-        result.replace(pos, find.length(), rep);
-    }
+    return string_utils::replace(result, find, rep, 1);
+
 }
 
 int XMLParser::ParseXMLEvaluate(char* expr, uint64_t& value) {
@@ -401,7 +398,6 @@ int XMLParser::ParseXMLString(const std::string& line, const std::string& key, s
     value = line.substr(pos + 1, endPos - pos - 1);
     return ERROR_SUCCESS;
 }
-
 
 int XMLParser::ParseXMLInteger(char* line, const char* key, uint64_t* value) {
     // Check to make sure none of the parameters are null

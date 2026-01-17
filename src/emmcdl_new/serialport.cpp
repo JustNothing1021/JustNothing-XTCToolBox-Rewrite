@@ -1,6 +1,6 @@
 
 #include "emmcdl_new/serialport.h"
-#include "emmcdl/utils.h"
+#include "emmcdl_new/utils.h"
 #include "utils/logger.h"
 #include "utils/time_utils.h"
 
@@ -69,6 +69,7 @@ int SerialPort::Open(int port) {
     portNum = port;
     swprintf_s(tPath, 32, L"\\\\.\\COM%d", port);
     // Open handle to serial port and set proper port settings
+    LDEBUG("SerialPort::Open", "打开串口COM%d", port);
     hPort = CreateFileW(tPath,
         (GENERIC_READ | GENERIC_WRITE),
         FILE_SHARE_READ,
@@ -78,9 +79,18 @@ int SerialPort::Open(int port) {
         NULL);
     if (hPort != INVALID_HANDLE_VALUE) {
         SetTimeout(timeout_ms);
+        DCB dcb = {0};
+        // dcb.DCBlength = sizeof(dcb);
+        if (GetCommState(hPort, &dcb)) {
+            uint32_t baudRate = dcb.BaudRate;
+            LDEBUG("SerialPort::Open", "COM%d打开成功，波特率：%d", port, baudRate);
+        }
         return ERROR_SUCCESS;
     }
-    return GetLastError();
+    int status = GetLastError();
+    LERROR("SerialPort::Open", "COM%d打开失败，状态：%s", 
+        port, getErrorDescription(status).c_str());
+    return status;
 }
 
 
@@ -110,7 +120,7 @@ int SerialPort::Write(const ByteArray &data, DWORD max_length, DWORD* bytesWritt
         status = GetLastError();
         LWARN("SerialPort::Write", "向串口COM%d写入数据失败：%s", 
             portNum,
-            string_utils::wstr2str(getErrorDescription(status)).c_str());
+            getErrorDescription(status).c_str());
     }
     WriteBinaryLog("HOST to TARGET =====>", 
         time_utils::get_formatted_time_with_frac(
@@ -131,7 +141,7 @@ int SerialPort::Read(ByteArray &data, DWORD max_length, DWORD* bytesRead) {
     // Read data in from serial port
     if (!ReadFile(hPort, data.data(), bytesToRead, bytesRead, NULL)) {
         status = GetLastError();
-        LWARN("SerialPort::Read", "从串口COM%d读取数据失败：%s", string_utils::wstr2str(getErrorDescription(status)).c_str());
+        LWARN("SerialPort::Read", "从串口COM%d读取数据失败：%s", getErrorDescription(status).c_str());
     }
     WriteBinaryLog("TARGET to HOST  <=====", 
         time_utils::get_formatted_time_with_frac(
@@ -148,7 +158,7 @@ int SerialPort::Write(const BYTE* data, DWORD length) {
         status = GetLastError();
         LWARN("SerialPort::Write", "向串口COM%d写入数据失败：%s", 
             portNum,
-            string_utils::wstr2str(getErrorDescription(status)).c_str());
+            getErrorDescription(status).c_str());
     }
     WriteBinaryLog("HOST to TARGET  =====>", 
         time_utils::get_formatted_time_with_frac(
@@ -168,7 +178,7 @@ int SerialPort::Read(BYTE* data, DWORD* length) {
         status = GetLastError();
         LWARN("SerialPort::Read", "从串口COM%d读取数据失败：%s", 
             portNum,
-            string_utils::wstr2str(getErrorDescription(status)).c_str()
+            getErrorDescription(status).c_str()
         );
     }
     WriteBinaryLog("TARGET to HOST  <=====", 

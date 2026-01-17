@@ -1,4 +1,4 @@
-
+#include <typeindex>
 #include "utils/string_utils.h"
 
 using namespace std;
@@ -18,114 +18,123 @@ struct is_instance_of_template<T<Args...>, T> : true_type {};
 
 
 string string_utils::demangle(const type_info& ti) {
+#ifdef __GNUC__
+    // GCC/Clang 平台使用 abi::__cxa_demangle
     int status = -1;
     char* ptr = abi::__cxa_demangle(ti.name(), 0, 0, &status);
     string realname = status == 0 ? ptr : ti.name();
     string realname_n = string_utils::replace(realname, " >", ">");
     free(ptr);
     return realname_n;
+#else
+    // Windows/MSVC 平台，直接返回类型名
+    string realname = ti.name();
+    // 简单的清理：移除 class/struct 前缀
+    size_t pos = realname.find_last_of(" ");
+    if (pos != string::npos) {
+        realname = realname.substr(pos + 1);
+    }
+    return string_utils::replace(realname, " >", ">");
+#endif
 }
 
 string string_utils::format_any(const any& value, const string& format_str) {
-    auto format_dispatcher = [&](auto&& arg) -> string {
-        try {
-            return fmt::format("{:" + format_str + "}", arg);
-        } catch (const exception& e) {
-            using T = decay_t<decltype(arg)>;
-            cerr << "格式化对象出错: " << e.what() << endl;
-            return fmt::format("{}({})",
-                demangle(typeid(T)),
-                static_cast<const void*>(&arg));
-        }
-        };
-
+    static const unordered_map<type_index, function<string(const any&, const string&)>> type_formatters = { 
+        {typeid(char), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<char>(v)) : fmt::format("{:" + fmt + "}", any_cast<char>(v));
+        }},
+        {typeid(int), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<int>(v)) : fmt::format("{:" + fmt + "}", any_cast<int>(v));
+        }},
+        {typeid(short), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<short>(v)) : fmt::format("{:" + fmt + "}", any_cast<short>(v));
+        }},
+        {typeid(long), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<long>(v)) : fmt::format("{:" + fmt + "}", any_cast<long>(v));
+        }},
+        {typeid(long long), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<long long>(v)) : fmt::format("{:" + fmt + "}", any_cast<long long>(v));
+        }},
+        {typeid(unsigned char), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<unsigned char>(v)) : fmt::format("{:" + fmt + "}", any_cast<unsigned char>(v));
+        }},
+        {typeid(unsigned int), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<unsigned int>(v)) : fmt::format("{:" + fmt + "}", any_cast<unsigned int>(v));
+        }},
+        {typeid(unsigned short), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<unsigned short>(v)) : fmt::format("{:" + fmt + "}", any_cast<unsigned short>(v));
+        }},
+        {typeid(unsigned long), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<unsigned long>(v)) : fmt::format("{:" + fmt + "}", any_cast<unsigned long>(v));
+        }},
+        {typeid(unsigned long long), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<unsigned long long>(v)) : fmt::format("{:" + fmt + "}", any_cast<unsigned long long>(v));
+        }},
+        {typeid(float), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<float>(v)) : fmt::format("{:" + fmt + "}", any_cast<float>(v));
+        }},
+        {typeid(double), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<double>(v)) : fmt::format("{:" + fmt + "}", any_cast<double>(v));
+        }},
+        {typeid(long double), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? to_string(any_cast<long double>(v)) : fmt::format("{:" + fmt + "}", any_cast<long double>(v));
+        }},
+        {typeid(bool), [](const any& v, const string& fmt) -> string {
+            return any_cast<bool>(v) ? "true" : "false";
+        }},
+        {typeid(string), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? any_cast<string>(v) : fmt::format("{:" + fmt + "}", any_cast<string>(v));
+        }},
+        {typeid(const char*), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? string(any_cast<const char*>(v)) : fmt::format("{:" + fmt + "}", any_cast<const char*>(v));
+        }},
+        {typeid(void*), [](const any& v, const string& fmt) -> string {
+            return fmt.empty() ? fmt::format("{}", any_cast<void*>(v)) : fmt::format("{:" + fmt + "}", any_cast<void*>(v));
+        }}
+    };
 
     try {
-
-        if (value.type() == typeid(char))
-            return format_dispatcher(any_cast<char>(value));
-
-        if (value.type() == typeid(int))
-            return format_dispatcher(any_cast<int>(value));
-
-        if (value.type() == typeid(short))
-            return format_dispatcher(any_cast<short>(value));
-
-        if (value.type() == typeid(long))
-            return format_dispatcher(any_cast<long>(value));
-
-        if (value.type() == typeid(long long))
-            return format_dispatcher(any_cast<long long>(value));
-
-        if (value.type() == typeid(unsigned char))
-            return format_dispatcher(any_cast<unsigned char>(value));
-
-        if (value.type() == typeid(unsigned int))
-            return format_dispatcher(any_cast<unsigned int>(value));
-
-        if (value.type() == typeid(unsigned short))
-            return format_dispatcher(any_cast<unsigned short>(value));
-
-        if (value.type() == typeid(unsigned long))
-            return format_dispatcher(any_cast<unsigned long>(value));
-
-        if (value.type() == typeid(unsigned long long))
-            return format_dispatcher(any_cast<unsigned long long>(value));
-
-        if (value.type() == typeid(float))
-            return format_dispatcher(any_cast<float>(value));
-
-        if (value.type() == typeid(double))
-            return format_dispatcher(any_cast<double>(value));
-
-        if (value.type() == typeid(long double))
-            return format_dispatcher(any_cast<long double>(value));
-
-        if (value.type() == typeid(bool))
-            return any_cast<bool>(value) ? "true" : "false";
-
-        if (value.type() == typeid(string))
-            return format_dispatcher(any_cast<string>(value));
-
-        if (value.type() == typeid(const char*))
-            return format_dispatcher(any_cast<const char*>(value));
-
-        if (value.type() == typeid(std::chrono::_V2::system_clock::time_point))
-            return format_dispatcher(any_cast<std::chrono::_V2::system_clock::time_point>(value));
-
-        if (value.type() == typeid(void*))
-            return format_dispatcher(any_cast<void*>(value));
+        auto it = type_formatters.find(type_index(value.type()));
+        if (it != type_formatters.end()) {
+            return it->second(value, format_str);
+        }
         
-        if (is_instance_of_template<decltype(value), std::vector>::value) { // 不知道该怎么写了，decltype出来的是any((
-            auto vec = any_cast<std::vector<any>>(value);
+        // 处理 vector<any> 类型，避免递归调用
+        if (value.type() == typeid(vector<any>)) {
+            auto vec = any_cast<vector<any>>(value);
             string result = "[";
             for (size_t i = 0; i < vec.size(); ++i) {
-                result += format_any(vec[i], format_str);
+                // 避免递归调用 format_any，直接使用简单的格式化
+                if (vec[i].type() == typeid(string)) {
+                    result += '"' + any_cast<string>(vec[i]) + '"';
+                } else if (vec[i].type() == typeid(int)) {
+                    result += to_string(any_cast<int>(vec[i]));
+                } else if (vec[i].type() == typeid(double)) {
+                    result += to_string(any_cast<double>(vec[i]));
+                } else {
+                    // 对于复杂类型，使用简单的格式化
+                    result += fmt::format("<{}>", demangle(vec[i].type()));
+                }
                 if (i != vec.size() - 1) {
                     result += ", ";
                 }
             }
             result += "]";
             return result;
-
         }
 
     } catch (const exception& e) {
         cerr << "格式化对象出错: " << e.what() << endl;
-    } catch (const char * e) {
-        cerr << "格式化对象出错: " << e << endl;
     } catch (...) {
         cerr << "格式化对象出错: 未知错误" << endl;
     }
 
+    // 默认格式化
     try {
         return fmt::format("<{} object at 0x{:016x}>", demangle(value.type()), (uint64_t) (void*) &value);
     } catch (...) {
         return fmt::format("<{} (mangled) object at 0x{:016x}>", value.type().name(), (uint64_t) (void*) &value);
     }
-
-
-
 }
 
 
@@ -262,8 +271,24 @@ string string_utils::trim(const string& str, const string& chars) {
     return ltrim(rtrim(str, chars), chars);
 }
 
+char buffer[4096];
 string string_utils::strip(const string& str) {
-    return trim(str);
+    if (str.length() >= sizeof(buffer)) {   // 需要动态分配内存
+        char *buffer2 = new char[str.length() + 1];
+        strcpy_s(buffer2, str.length() + 1, str.c_str());
+        char *lptr = buffer2, *rptr = buffer2 + str.length() - 1;
+        while (lptr <= rptr && isspace(*lptr)) ++lptr;
+        while (rptr >= lptr && isspace(*rptr)) --rptr;
+        string result(lptr, rptr + 1);
+        delete[] buffer2;
+        return result;
+    } else {
+        strcpy_s(buffer, sizeof(buffer), str.c_str());
+        char *lptr = buffer, *rptr = buffer + str.length() - 1;
+        while (lptr <= rptr && isspace(*lptr)) ++lptr;
+        while (rptr >= lptr && isspace(*rptr)) --rptr;
+        return string(lptr, rptr + 1);
+    }
 } 
 
 string string_utils::remove_invalid_utf8(const string& input, const string& replace_with) {

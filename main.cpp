@@ -7,9 +7,11 @@
 #include <QApplication>
 #include <QVBoxLayout>
 
+// #include <emmcdl/emmcdl.h>
 #include <emmcdl/utils.h>
 #include <emmcdl_new/xmlparser.h>
 #include <emmcdl_new/serialport.h>
+#include <emmcdl_new/emmcdl.h>
 
 #include <utils/logger.h>
 #include <utils/usb_utils.h>
@@ -318,7 +320,7 @@ public:
 };
 
 int main(int argc, char* argv[]) {
-    #if 1   
+    #if 1
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName("串口调试工具");
     QCoreApplication::setApplicationVersion("11.45.14");
@@ -326,19 +328,7 @@ int main(int argc, char* argv[]) {
     mainWindow.show();
     return app.exec();
     #else
-    unordered_map<string, int64_t> vars;
-    vars["NUM_DISK_SECTORS"] = 512;
-    while (1) {
-        string s;
-        int64_t res;
-        getline(cin, s);
-        try {
-            res = string_utils::calc_expr(s, vars);
-            cout << res << endl;
-        } catch (const std::exception& e) {
-            cerr << e.what() << endl;
-        }
-    }
+    return emmcdl_main(argc, argv);
     #endif
     return 0;
 }

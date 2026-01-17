@@ -1,6 +1,6 @@
 
 #include "emmcdl_new/sparse.h"
-#include "emmcdl/utils.h"
+#include "emmcdl_new/utils.h"
 #include "utils/logger.h"
 
 using namespace std;
@@ -49,7 +49,7 @@ int SparseImage::PreLoadImage(TCHAR* szSparseFile) {
     return ERROR_SUCCESS;
 }
 
-int SparseImage::PreLoadImage(string szSparseFile) {
+int SparseImage::PreLoadImage(const string &szSparseFile) {
     DWORD dwBytesRead;
     hSparseImage = CreateFileA(szSparseFile.c_str(),
         GENERIC_READ,
@@ -70,7 +70,7 @@ int SparseImage::PreLoadImage(string szSparseFile) {
         int stat = GetLastError();
         CloseHandle(hSparseImage);
         LERROR("SparseImage::PreLoadImage", "读取文件失败，状态：%s", 
-            string_utils::wstr2str(getErrorDescription(stat)).c_str());
+            getErrorDescription(stat).c_str());
         return stat == 0 ? ERROR_READ_FAULT : stat; // 以防GetLastError()返回0
     }
 
@@ -87,7 +87,7 @@ int SparseImage::ProgramImage(Protocol* pProtocol, int64_t dwOffset) {
 
     // Make sure we have first successfully found a sparse file and headers are loaded okay
     if (!bSparseImage) {
-        LERROR("SparseImage::ProgramImage", "稀疏镜像文件未正确加载");
+        LERROR("SparseImage::ProgramImage", "稀疏镜像文件未正确加载，返回ERROR_FILE_NOT_FOUND");
         return ERROR_FILE_NOT_FOUND;
     }
 
@@ -110,6 +110,9 @@ int SparseImage::ProgramImage(Protocol* pProtocol, int64_t dwOffset) {
                     pProtocol->WriteData(bpDataBuf, dwOffset, dwChunkSize, &dwBytesOut, 0);
                     dwOffset += ChunkHeader.dwChunkSize;
                 } else {
+                    LERROR("SparseImage::ProgramImage", "读取稀疏镜像文件时发生错误，状态：%s", 
+                        getErrorDescription(GetLastError()).c_str()
+                    );
                     status = GetLastError();
                     break;
                 }
@@ -129,7 +132,7 @@ int SparseImage::ProgramImage(Protocol* pProtocol, int64_t dwOffset) {
         } else {
             // Failed to read data something is wrong with the file
             LERROR("SparseImage::ProgramImage", "读取文件时发生错误，状态：%s", 
-                string_utils::wstr2str(getErrorDescription(status)).c_str()
+                getErrorDescription(status).c_str()
             );
             status = GetLastError();
             break;
@@ -141,6 +144,12 @@ int SparseImage::ProgramImage(Protocol* pProtocol, int64_t dwOffset) {
         bSparseImage = false;
         CloseHandle(hSparseImage);
     }
-
+    if (status == ERROR_SUCCESS) {
+        LINFO("SparseImage::ProgramImage", "稀疏镜像文件写入成功");
+    } else {
+        LERROR("SparseImage::ProgramImage", "稀疏镜像文件写入失败，状态：%s", 
+            getErrorDescription(status).c_str()
+        );
+    }
     return status;
 }

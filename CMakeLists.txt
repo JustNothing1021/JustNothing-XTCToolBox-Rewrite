@@ -54,24 +54,19 @@ add_executable(
     ${PROJECT_NAME}
 
     main.cpp
-    # src/emmcdl/crc.cpp
-    # src/emmcdl/diskwriter.cpp
-    # src/emmcdl/dload.cpp
-    # src/emmcdl/ffu.cpp
-    # src/emmcdl/firehose.cpp
-    # src/emmcdl/partition.cpp
-    # src/emmcdl/protocol.cpp
-    # src/emmcdl/sahara.cpp
-    # src/emmcdl/serialport.cpp
-    # src/emmcdl/sparse.cpp
-    # src/emmcdl/xmlparser.cpp
-    src/emmcdl/utils.cpp
-    # src/emmcdl/emmcdl.cpp
-
     src/emmcdl_new/serialport.cpp
     src/emmcdl_new/crc.cpp
     src/emmcdl_new/xmlparser.cpp
-    # src/emmcdl_new/partition.cpp
+    src/emmcdl_new/partition.cpp
+    src/emmcdl_new/protocol.cpp
+    src/emmcdl_new/sparse.cpp
+    src/emmcdl_new/diskwriter.cpp
+    src/emmcdl_new/dload.cpp
+    src/emmcdl_new/ffu.cpp
+    src/emmcdl_new/firehose.cpp
+    src/emmcdl_new/sahara.cpp
+    src/emmcdl_new/emmcdl.cpp
+    src/emmcdl_new/utils.cpp
 
     src/spddump/BMPlatform.cpp
     src/spddump/common.cpp
@@ -99,6 +94,7 @@ target_include_directories(
     ${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/emmcdl_new
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${Boost_INCLUDE_DIRS}
 )

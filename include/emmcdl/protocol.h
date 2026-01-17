@@ -57,7 +57,7 @@ protected:
     void Log(const char* str, ...);
     void Log(const TCHAR* str, ...);
 
-    gpt_header_t gpt_hdr;
+    gpt_header_t gpt_header;
     gpt_entry_t* gpt_entries;
     uint64_t disk_size;
     HANDLE hDisk;

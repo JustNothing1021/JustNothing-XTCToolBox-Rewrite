@@ -1,8 +1,15 @@
 
 
 # 测试文件
-.vscode/
+/.vscode/
 /build/
 /log/
 /demos/
 /test*.cpp
+
+# 有的时候我会在这里写算竞题（
+/P*.cpp
+/*.exe
+/*.in
+/*.out
+/*.ans

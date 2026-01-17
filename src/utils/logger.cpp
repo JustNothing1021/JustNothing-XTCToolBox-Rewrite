@@ -204,6 +204,27 @@ Logger::LogLevel Logger::LogLevel::getLevelByString(const string& level_str) {
 
 void Logger::initialize(size_t max_log_file_count) {
     if (initialized) return;
+    
+#ifdef _WIN32
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut != INVALID_HANDLE_VALUE) {
+        DWORD dwMode = 0;
+        if (GetConsoleMode(hOut, &dwMode)) {
+            dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            SetConsoleMode(hOut, dwMode);
+        }
+    }
+    
+    HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
+    if (hErr != INVALID_HANDLE_VALUE) {
+        DWORD dwMode = 0;
+        if (GetConsoleMode(hErr, &dwMode)) {
+            dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            SetConsoleMode(hErr, dwMode);
+        }
+    }
+#endif
+    
     string log_file_name = time_utils::get_formatted_time(Logger::initializer.construct_time, "log_%Y%m%d_%H%M%S.log");
     auto log_file_path = filesystem::current_path() / "log" / log_file_name;
     filesystem::create_directory(filesystem::current_path() / "log");

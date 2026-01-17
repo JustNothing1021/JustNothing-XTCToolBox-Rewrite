@@ -27,6 +27,7 @@
 #include "emmcdl/partition.h"
 #include "emmcdl/protocol.h"
 #include "emmcdl/sparse.h"
+#include "utils/logger.h"
 #include "winerror.h"
 #include <stdlib.h>
 
@@ -180,8 +181,7 @@ int Partition::ParseXMLEvaluate(TCHAR* expr, uint64_t& value, PartitionEntry* pe
         ParseXMLEvaluate(tmp, pe->crc_size, pe);
         // Revome the CRC part set value 0
         memset(sptr, ' ', (sptr2 - sptr + 1) * 2);
-        value = 0;
-    }
+    } value = 0;
 
     sptr = wcsstr(expr, L"*");
     if (sptr != NULL) {
@@ -225,6 +225,7 @@ int Partition::ParseXMLEvaluate(TCHAR* expr, uint64_t& value, PartitionEntry* pe
 
     return ERROR_SUCCESS;
 }
+
 
 int Partition::ParseXMLInt64(TCHAR* line, const TCHAR* key, uint64_t& value, PartitionEntry* pe) {
     TCHAR tmp[MAX_STRING_LEN];
@@ -383,12 +384,12 @@ int Partition::ProgramPartitionEntry(Protocol* proto, PartitionEntry pe, TCHAR* 
     int status = ERROR_SUCCESS;
 
     if (proto == NULL) {
-        wprintf(L"Can't write to disk no protocol passed in.\n");
+        LWARN("Partition::ProgramPartitionEntry", "无法写入磁盘，未传入有效的协议对象");
         return ERROR_INVALID_PARAMETER;
     }
 
     if (wcscmp(pe.filename, L"ZERO") == 0) {
-        wprintf(L"Zeroing out area\n");
+        LINFO("Partition::ProgramPartitionEntry", "正在擦除分区内容");
     } else {
         // First check if the file is a sparse image then program via sparse
         SparseImage sparse;
@@ -397,7 +398,7 @@ int Partition::ProgramPartitionEntry(Protocol* proto, PartitionEntry pe, TCHAR* 
             bSparse = true;
             status = sparse.ProgramImage(proto, pe.start_sector * proto->GetDiskSectorSize());
         } else {
-            wprintf(L"\nSparse image not detected -- loading binary\n");
+            LINFO("Partition::ProgramPartitionEntry", "未检测到稀疏镜像文件，加载普通二进制文件");
             // Open the file that we are supposed to dump
             status = ERROR_SUCCESS;
             hRead = CreateFile(pe.filename,
@@ -419,7 +420,7 @@ int Partition::ProgramPartitionEntry(Protocol* proto, PartitionEntry pe, TCHAR* 
                 if (dwTotalSize <= (int64_t) pe.num_sectors) {
                     pe.num_sectors = dwTotalSize;
                 } else {
-                    wprintf(L"\nFileSize is > partition size, truncating file\n");
+                    LWARN("Partition::ProgramPartitionEntry", "文件大小超过分区大小，将截断文件");
                 }
                 status = ERROR_SUCCESS;
             }
@@ -428,7 +429,7 @@ int Partition::ProgramPartitionEntry(Protocol* proto, PartitionEntry pe, TCHAR* 
 
     if (status == ERROR_SUCCESS && !bSparse) {
         // Fast copy from input file to output disk
-        wprintf(L"In offset: %llu out offset: %llu sectors: %llu\n", pe.offset, pe.start_sector, pe.num_sectors);
+        LDEBUG("Partition::ProgramPartitionEntry", "输入偏移: %llu 输出偏移: %llu 扇区数: %llu", pe.offset, pe.start_sector, pe.num_sectors);
         status = proto->FastCopy(hRead, pe.offset, proto->GetDiskHandle(), pe.start_sector, pe.num_sectors, pe.physical_partition_number);
         CloseHandle(hRead);
     }

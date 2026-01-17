@@ -30,20 +30,6 @@ Sahara::Sahara(SerialPort* port, HANDLE hLogFile) {
     hLog = hLogFile;
 }
 
-void Sahara::Log(const char* str, ...) {
-    // For now map the log to dump output to console
-    va_list ap;
-    va_start(ap, str);
-    vprintf(str, ap);
-    va_end(ap);
-}
-void Sahara::Log(const TCHAR* str, ...) {
-    // For now map the log to dump output to console
-    va_list ap;
-    va_start(ap, str);
-    vwprintf(str, ap);
-    va_end(ap);
-}
 
 int Sahara::DeviceReset() {
     execute_cmd_t exe_cmd;
@@ -101,10 +87,10 @@ int Sahara::DumpDeviceInfo(pbl_info_t* pbl_info) {
 
     status = sport->Read((BYTE*) &cmd_rdy, &bytesRead);
     if (status != ERROR_SUCCESS || bytesRead == 0) {
-        Log(L"No response from device after switch mode command\n");
+        LWARN("Sahara::DumpDeviceInfo", "切换模式命令后设备无响应");
         return ERROR_INVALID_PARAMETER;
     } else if (cmd_rdy.cmd != SAHARA_CMD_READY) {
-        Log(L"Unexpected response for command mode %d\n", cmd_rdy.cmd);
+        LWARN("Sahara::DumpDeviceInfo", "切换模式命令后设备无响应, 返回值: %d", cmd_rdy.cmd);
         return ERROR_INVALID_PARAMETER;
     }
 
@@ -197,13 +183,15 @@ int Sahara::LoadFlashProg(TCHAR* szFlashPrg) {
 
         // Set the offset in the file requested
         if (SetFilePointer(hFlashPrg, read_data_offset, NULL, FILE_BEGIN) == INVALID_SET_FILE_POINTER) {
-            Log(L"Failed to update FlashProgrammer pointer offset\n");
+            // Log(L"Failed to update FlashProgrammer pointer offset\n");
+            LWARN("Sahara::LoadFlashProg", "更新烧录内核文件指针偏移失败");
             CloseHandle(hFlashPrg);
             return GetLastError();
         }
 
         if (!ReadFile(hFlashPrg, dataBuf, read_data_len, &bytesRead, NULL)) {
-            Log(L"Failed to read data from flash programmer file\n");
+            // Log(L"Failed to read data from flash programmer file\n");
+            LWARN("Sahara::LoadFlashProg", "从烧录内核文件读取数据失败");
             CloseHandle(hFlashPrg);
             return GetLastError();
         }
@@ -211,7 +199,8 @@ int Sahara::LoadFlashProg(TCHAR* szFlashPrg) {
         //Log(L"FileOffset %d bytesRead %d\n", read_data_offset, bytesRead);
 
         if (sport->Write(dataBuf, bytesRead) != ERROR_SUCCESS) {
-            Log(L"Failed to write data to device in IMEM\n");
+            // Log(L"Failed to write data to device in IMEM\n");
+            LWARN("Sahara::LoadFlashProg", "向设备写入数据时失败");
             CloseHandle(hFlashPrg);
             return GetLastError();
         }
@@ -222,7 +211,8 @@ int Sahara::LoadFlashProg(TCHAR* szFlashPrg) {
     CloseHandle(hFlashPrg);
 
     if (read_cmd_hdr.cmd != SAHARA_END_TRANSFER) {
-        Log(L"Expecting SAHARA_END_TRANSFER but found: %d\n", read_cmd_hdr.cmd);
+        // Log(L"Expecting SAHARA_END_TRANSFER but found: %d\n", read_cmd_hdr.cmd);
+        LWARN("Sahara::LoadFlashProg", "预期收到SAHARA_END_TRANSFER命令 (%d)，但实际收到了%d", SAHARA_END_TRANSFER, read_cmd_hdr.cmd);
         return ERROR_WRITE_FAULT;
     }
 
@@ -230,7 +220,8 @@ int Sahara::LoadFlashProg(TCHAR* szFlashPrg) {
     bytesRead = sizeof(read_img_end);
     status = sport->Read((BYTE*) &read_img_end, &bytesRead);
     if (read_img_end.status != SAHARA_ERROR_SUCCESS) {
-        Log(L"Image load failed with status: %d\n", read_img_end.status);
+        // Log(L"Image load failed with status: %d\n", read_img_end.status);
+        LWARN("Sahara::LoadFlashProg", "烧录内核失败，错误码: %d", read_img_end.status);
         return read_img_end.status;
     }
 
@@ -245,7 +236,8 @@ int Sahara::LoadFlashProg(TCHAR* szFlashPrg) {
     bytesRead = sizeof(done_pkt);
     status = sport->Read((BYTE*) &done_pkt, &bytesRead);
     if (done_pkt.cmd != SAHARA_DONE_RSP) {
-        Log(L"Expecting SAHARA_DONE_RSP but found: %d", done_pkt.cmd);
+        // Log(L"Expecting SAHARA_DONE_RSP but found: %d", done_pkt.cmd);
+        LWARN("Sahara::LoadFlashProg", "预期收到SAHARA_DONE_RSP命令，但实际收到到了 %d", done_pkt.cmd);
         return ERROR_WRITE_FAULT;
     }
 
@@ -280,7 +272,7 @@ int Sahara::ConnectToDevice(bool bReadHello, int mode) {
                 // If we fail to connect try to do a mode switch commaand to get hello packet and try again
                 LWARN("Sahara::ConnectToDevice", "未收到设备的Sahara协议Hello数据包, 状态: %s", 
                     string_utils::wstr2str(getErrorDescription(status)).c_str());
-                LWARN("Sahara::ConnectToDevice", "接收到的数据: \n%s", string_utils::to_hex_view((char*) &hello_req, bytesRead).c_str());
+                LWARN("Sahara::ConnectToDevice", "接收到的数据: \n%s", bytesRead ? string_utils::to_hex_view((char*) &hello_req, bytesRead).c_str() : "<空>");
                 return ERROR_INVALID_HANDLE;
             // }
         }

@@ -3,35 +3,12 @@
 #include "emmcdl_new/partition.h"
 #include "emmcdl_new/protocol.h"
 #include "emmcdl_new/sparse.h"
-#include "emmcdl_new/xmlparser.h"
+#include "emmcdl_new/utils.h"
+#include "utils/string_utils.h"
+#include "utils/logger.h"
 
 
 using namespace std;
-
- // Note currently just replace in place and fill in spaces
-TCHAR* StringSetValue(TCHAR* key, TCHAR* keyName, TCHAR* value) {
-    TCHAR* sptr = wcsstr(key, keyName);
-    if (sptr == NULL) return key;
-
-    sptr = wcsstr(sptr, L"\"");
-    if (sptr == NULL) return key;
-
-    // Loop through and replace with actual size;
-    for (sptr++;;) {
-        TCHAR tmp = *value++;
-        if (*sptr == '"') break;
-        if (tmp == 0) {
-            *sptr++ = '"';
-            for (;*sptr != '"';sptr++) {
-                *sptr = ' ';
-            }
-            *sptr = ' ';
-            break;
-        }
-        *sptr++ = tmp;
-    }
-    return key;
-}
 
 string StringSetValue(std::string inp, const std::string find, const std::string rep) {
     while (true) {
@@ -39,71 +16,117 @@ string StringSetValue(std::string inp, const std::string find, const std::string
         if (pos == std::string::npos) break;
         inp.replace(pos, find.length(), rep);
     }
-}
-
-TCHAR* StringReplace(TCHAR* inp, const TCHAR* find, const TCHAR* rep) {
-    TCHAR tmpstr[MAX_STRING_LEN];
-    int max_len = MAX_STRING_LEN;
-    TCHAR* tptr = tmpstr;;
-    TCHAR* sptr = wcsstr(inp, find);
-
-    if (sptr != NULL) {
-        // Copy part of string before the value to replace
-        wcsncpy_s(tptr, max_len, inp, (sptr - inp));
-        max_len -= (sptr - inp);
-        tptr += (sptr - inp);
-        sptr += wcslen(find);
-        // Copy the replace value
-        wcsncpy_s(tptr, max_len, rep, wcslen(rep));
-        max_len -= wcslen(rep);
-        tptr += wcslen(rep);
-
-        // Copy the rest of the string
-        wcsncpy_s(tptr, max_len, sptr, wcslen(sptr));
-
-        // Copy new temp string back into original
-        wcscpy_s(inp, MAX_STRING_LEN, tmpstr);
-    }
-
     return inp;
 }
 
 
+int Partition::ParseXMLEvaluate(std::string expr, uint64_t& value, PartitionEntry* pe) {
+
+    // 全词匹配
+    function<size_t(const string&, const string&, size_t, const string&)> fullyMatch =
+        [&](const string& str, const string& pattern, size_t offset, const string& ignores) -> size_t {
+        size_t res = str.find(pattern, offset);
+        if (res == string::npos) return res;
+        if (res > 0) {
+            char prev = str[res - 1];
+            if (isspace(prev) || ignores.find(prev) != string::npos) {
+                return res;
+            } else {
+                return string::npos;
+            }
+        }
+        if (res + pattern.length() < str.length()) {
+            char next = str[res + pattern.length()];
+            if (isspace(next) || ignores.find(next) != string::npos) {
+                return res;
+            } else {
+                return string::npos;
+            }
+        }
+        return res;
+        };
 
 
-int Partition::Log(const char* str, ...) {
-    // For now map the log to dump output to console
-    va_list ap;
-    va_start(ap, str);
-    vprintf(str, ap);
-    va_end(ap);
+    // 替换NUM_DISK_SECTORS
+    while (true) {
+        size_t pos = fullyMatch(expr, "NUM_DISK_SECTORS", 0, " \t\r\n+-*/");
+        if (pos == std::string::npos) break;
+        expr.replace(pos, strlen("NUM_DISK_SECTORS"), to_string(NUM_DISK_SECTORS));
+    }
+
+    // 处理CRC32(offset,length)
+    bool isFirstWarnCRC32 = true;
+    while (true) {
+        size_t pos = fullyMatch(expr, "CRC32", 0, " (+-*/)=\"\t\r\n");
+        if (pos == string::npos) break;
+        size_t startPos = expr.find("(", pos);
+        if (startPos == string::npos) {
+            LERROR("Partition::ParseXMLEvaluate", "表达式\"%s\"中的CRC32缺少左括号，"
+                "位于第%d个字符，返回ERROR_INVALID_DATA", expr.c_str(), pos);
+            return ERROR_INVALID_DATA;
+        }
+        size_t endPos = expr.find(")", startPos);
+        if (endPos == string::npos) {
+            LERROR("Partition::ParseXMLEvaluate", "表达式\"%s\"中的CRC32缺少右括号，"
+                "位于第%d个字符，返回ERROR_INVALID_DATA", expr.c_str(), pos);
+            return ERROR_INVALID_DATA;
+        }
+        string crcExpr = expr.substr(startPos + 1, endPos - startPos - 1);
+        if (crcExpr.find(",") == string::npos) {
+            LERROR("Partition::ParseXMLEvaluate", "表达式\"%s\"中的CRC32参数(\"%s\")缺少逗号，"
+                "位于第%d个字符，返回ERROR_INVALID_DATA", expr.c_str(), crcExpr.c_str(), pos);
+            return ERROR_INVALID_DATA;
+        }
+        LDEBUG("Partition::ParseXMLEvaluate", "本行使用了CRC32(%s)", crcExpr);
+        size_t commaPos = crcExpr.find(",");
+        string offsetExpr = crcExpr.substr(0, commaPos);
+        string lengthExpr = crcExpr.substr(commaPos + 1);
+        uint64_t crc;
+        uint64_t offset, length;
+        if (ParseXMLEvaluate(offsetExpr, offset, pe) != ERROR_SUCCESS) {
+            LERROR("Partition::ParseXMLEvaluate", "无法计算表达式\"%s\"中的CRC32偏移量部分\"%s\"，"
+                "返回ERROR_INVALID_DATA", expr.c_str(), offsetExpr.c_str());
+            return ERROR_INVALID_DATA;
+        }
+        if (ParseXMLEvaluate(lengthExpr, length, pe) != ERROR_SUCCESS) {
+            LERROR("Partition::ParseXMLEvaluate", "无法计算表达式\"%s\"中的CRC32长度部分\"%s\"，"
+                "返回ERROR_INVALID_DATA", expr.c_str(), lengthExpr.c_str());
+            return ERROR_INVALID_DATA;
+        }
+        pe->crc_start = offset;
+        pe->crc_size = length;
+    }
+    try {
+        value = string_utils::calc_expr(expr);
+    } catch (const std::exception& e) {
+        LERROR("Partition::ParseXMLEvaluate", "无法计算表达式\"%s\"，错误信息：%s，返回ERROR_INVALID_DATA", expr.c_str(), e.what());
+        return ERROR_INVALID_DATA;
+    }
     return ERROR_SUCCESS;
 }
 
-int Partition::Log(const TCHAR* str, ...) {
-    // For now map the log to dump output to console
-    va_list ap;
-    va_start(ap, str);
-    vwprintf(str, ap);
-    va_end(ap);
-    return ERROR_SUCCESS;
+int Partition::ParseXMLInt64(const string& line, const string& key, uint64_t& value, PartitionEntry* pe) {
+    std::string tmp;
+    if (ParseXMLString(line, key, tmp) != ERROR_SUCCESS) {
+        LWARN("Partition::ParseXMLInt64", "无法找到键值对\"%s\"，返回ERROR_INVALID_DATA", key.c_str());
+        return ERROR_INVALID_DATA;
+    }
+    return ParseXMLEvaluate(tmp, value, pe);
 }
 
 
 int Partition::Reflect(int data, int len) {
     int ref = 0;
-
     for (int i = 0; i < len; i++) {
         if (data & 0x1) {
             ref |= (1 << ((len - 1) - i));
         }
         data = (data >> 1);
     }
-
     return ref;
 }
 
-unsigned int Partition::CalcCRC32(BYTE* buffer, int len) {
+unsigned int Partition::CalcCRC32(const BYTE* buffer, int len) {
     int k = 8;                   // length of unit (i.e. BYTE)
     int MSB = 0;
     int gx = 0x04C11DB7;         // IEEE 32bit polynomial
@@ -131,109 +154,11 @@ unsigned int Partition::CalcCRC32(BYTE* buffer, int len) {
     return Reflect(regs, 32) ^ 0xFFFFFFFF;
 }
 
-int Partition::ParseXMLString(const TCHAR* line, const TCHAR* key, TCHAR* value) {
-    TCHAR* eptr;
-    TCHAR* sptr = wcsstr(line, key);
-    if (sptr == NULL) return ERROR_INVALID_DATA;
-    sptr = wcschr(sptr, L'"');
-    if (sptr == NULL) return ERROR_INVALID_DATA;
-    sptr++;
-    eptr = wcschr(sptr, L'"');
-    if (eptr == NULL) return ERROR_INVALID_DATA;
-    // Copy the value between the quotes to output string
-    wcsncpy_s(value, MAX_PATH, sptr, eptr - sptr);
-    return ERROR_SUCCESS;
-}
-
-int Partition::ParseXMLEvaluate(TCHAR* expr, uint64_t& value, PartitionEntry* pe) {
-    // Parse simple expression understands -+/*, NUM_DISK_SECTORS,CRC32(offset:length)
-    TCHAR disk_sectors[64];
-    TCHAR* sptr, * sptr1, * sptr2;
-    _i64tow_s(d_sectors, disk_sectors, 64, 10);
-    expr = StringReplace(expr, _T("NUM_DISK_SECTORS"), disk_sectors);
-    value = _wtoi64(expr);
-
-    sptr = wcsstr(expr, L"CRC32");
-    if (sptr != NULL) {
-        TCHAR tmp[MAX_STRING_LEN];
-        sptr1 = wcsstr(sptr, L"(") + 1;
-        if (sptr1 == NULL) return ERROR_INVALID_PARAMETER;
-        sptr2 = wcsstr(sptr1, L",");
-        if (sptr2 == NULL) return ERROR_INVALID_PARAMETER;
-        wcsncpy_s(tmp, MAX_STRING_LEN, sptr1, (sptr2 - sptr1));
-        ParseXMLEvaluate(tmp, pe->crc_start, pe);
-        sptr1 = sptr2 + 1;
-        sptr2 = wcsstr(sptr1, L")");
-        if (sptr2 == NULL) return ERROR_INVALID_PARAMETER;
-        wcsncpy_s(tmp, MAX_STRING_LEN, sptr1, (sptr2 - sptr1));
-        ParseXMLEvaluate(tmp, pe->crc_size, pe);
-        // Revome the CRC part set value 0
-        memset(sptr, ' ', (sptr2 - sptr + 1) * 2);
-        value = 0;
-    }
-
-    sptr = wcsstr(expr, L"*");
-    if (sptr != NULL) {
-        // Found * do multiplication
-        TCHAR val1[64];
-        TCHAR val2[64];
-        wcsncpy_s(val1, 64, expr, (sptr - expr));
-        wcscpy_s(val2, 64, sptr + 1);
-        value = _wtoi64(val1) * _wtoi64(val2);
-    }
-
-    sptr = wcsstr(expr, L"/");
-    if (sptr != NULL) {
-        // Found / do division
-        TCHAR val1[64];
-        TCHAR val2[64];
-        wcsncpy_s(val1, 64, expr, (sptr - expr));
-        wcscpy_s(val2, 64, sptr + 1);
-        value = _wtoi64(val1) / _wtoi64(val2);
-    }
-
-    sptr = wcsstr(expr, L"-");
-    if (sptr != NULL) {
-        // Found - do subtraction
-        TCHAR val1[32];
-        TCHAR val2[32];
-        wcsncpy_s(val1, 32, expr, (sptr - expr));
-        wcscpy_s(val2, 32, sptr + 1);
-        value = _wtoi64(val1) - _wtoi64(val2);
-    }
-
-    sptr = wcsstr(expr, L"+");
-    if (sptr != NULL) {
-        // Found + do addition
-        TCHAR val1[32];
-        TCHAR val2[32];
-        wcsncpy_s(val1, 32, expr, (sptr - expr));
-        wcscpy_s(val2, 32, sptr + 1);
-        value = _wtoi64(val1) + _wtoi64(val2);
-    }
-
-    return ERROR_SUCCESS;
-}
-
-int Partition::ParseXMLInt64(TCHAR* line, const TCHAR* key, uint64_t& value, PartitionEntry* pe) {
-    TCHAR tmp[MAX_STRING_LEN];
-    TCHAR* eptr;
-    TCHAR* sptr = wcsstr(line, key);
-    if (sptr == NULL) return ERROR_INVALID_DATA;
-    sptr = wcschr(sptr, L'"');
-    if (sptr == NULL) return ERROR_INVALID_DATA;
-    sptr++;
-    eptr = wcschr(sptr, L'"');
-    if (eptr == NULL) return ERROR_INVALID_DATA;
-    wcsncpy_s(tmp, MAX_STRING_LEN, sptr, eptr - sptr);
-
-    ParseXMLEvaluate(tmp, value, pe);
-
-    return ERROR_SUCCESS;
+uint32_t Partition::CalcCRC32(const ByteArray& buffer, int len) {
+    return CalcCRC32(buffer.data(), len);
 }
 
 int Partition::ParseXMLOptions() {
-
     return ERROR_SUCCESS;
 }
 
@@ -241,119 +166,142 @@ int Partition::ParsePathList() {
     return ERROR_SUCCESS;
 }
 
-bool Partition::CheckEmptyLine(TCHAR* str) {
-    int keylen = wcslen(str);
-    while (iswspace(*str) && (keylen > 0)) {
-        str++;
+
+bool Partition::CheckEmptyLine(std::string str) {
+    size_t keylen = str.length();
+    size_t index = 0;
+    while (index < keylen && isspace(str[index])) {
+        index++;
         keylen--;
     }
-
     return (keylen == 0);
 }
 
-int Partition::ParseXMLKey(TCHAR* key, PartitionEntry* pe) {
-    // If line is whitepsace return CMD_NOP
-    if (CheckEmptyLine(key)) {
+int Partition::ParseXMLKey(const string& line, PartitionEntry* pe) {
+    // 如果是空行那么什么也不干
+    if (CheckEmptyLine(line)) {
         pe->eCmd = CMD_NOP;
         return ERROR_SUCCESS;
     }
 
-    // First of all check if this is a program, patch or zeroout line
+    // 检查这一行执行的命令
     pe->eCmd = CMD_INVALID;
-    if (wcsstr(key, L"<data>") != NULL || wcsstr(key, L"</data>") != NULL
-        || wcsstr(key, L"</patches>") != NULL || wcsstr(key, L"</data>") != NULL) {
+    string stripped = string_utils::strip(line);
+    if (stripped.substr(0, 8) == "<data>" || stripped.substr(0, 9) == "</data>"
+        || stripped.substr(0, 10) == "<patches>" || stripped.substr(0, 9) == "</patches>") {
         pe->eCmd = CMD_NOP;
+        LDEBUG("Partition::ParseXMLKey", "本行是格式符或空行，不执行操作，命令设置为CMD_NOP");
         return ERROR_SUCCESS;
-    } else if (wcsstr(key, L"program") != NULL) {
+    } else if (stripped.substr(0, 8) == "<program") {
         pe->eCmd = CMD_PROGRAM;
-    } else if (wcsstr(key, L"patch") != NULL) {
+        LDEBUG("Partition::ParseXMLKey", "本行命令为program，设置命令为CMD_PROGRAM");
+    } else if (stripped.substr(0, 6) == "<patch") {
         pe->eCmd = CMD_PATCH;
-    } else if (wcsstr(key, L"options") != NULL) {
+        LDEBUG("Partition::ParseXMLKey", "本行命令为patch，设置命令为CMD_PATCH");
+    } else if (stripped.substr(0, 8) == "<options") {
         pe->eCmd = CMD_OPTION;
-    } else if (wcsstr(key, L"search_path") != NULL) {
+        LDEBUG("Partition::ParseXMLKey", "本行命令为options，设置命令为CMD_OPTION");
+    } else if (stripped.substr(0, 12) == "<search_path") {
         pe->eCmd = CMD_PATH;
-    } else if (wcsstr(key, L"read") != NULL) {
+        LDEBUG("Partition::ParseXMLKey", "本行命令为search_path，设置命令为CMD_PATH");
+    } else if (stripped.substr(0, 6) == "<read") {
         pe->eCmd = CMD_READ;
+        LDEBUG("Partition::ParseXMLKey", "本行命令为read，设置命令为CMD_READ");
+    } else if (stripped.substr(0, 4) == "<!--" || stripped.substr(0, 3) == "-->" 
+            || stripped.substr(0, 2) == "<?") {
+        pe->eCmd = CMD_NOP;
+        LDEBUG("Partition::ParseXMLKey", "本行是注释，不执行操作，命令设置为CMD_NOP");
+        return ERROR_SUCCESS;
     } else {
+        LWARN("Partition::ParseXMLKey", "无法解析本行:\n  %s\n", line.c_str());
         return ERROR_INVALID_DATA;
     }
 
-    // Set options and search path
     if (pe->eCmd == CMD_OPTION) {
         ParseXMLOptions();
     } else if (pe->eCmd == CMD_PATH) {
         ParsePathList();
     }
 
-    // All commands need start_sector, physical_partition_number and num_partition_sectors
-    if (ParseXMLInt64(key, L"start_sector", pe->start_sector, pe) != ERROR_SUCCESS) {
-        Log(L"start_sector missing in XML line:%ls\n", key);
+    // 所有的命令都需要这三个参数
+    if (ParseXMLInt64(line, "start_sector", pe->start_sector, pe) != ERROR_SUCCESS) {
+        LWARN("Partition::ParseXMLKey", "XML中的一行缺少start_sector字段，返回ERROR_INVALID_DATA");
+        LWARN("Partition::ParseXMLKey", "原文内容:\n  %s\n", line.c_str());
         return ERROR_INVALID_DATA;
     } else {
-        Log("start_sector: %lld ", pe->start_sector);
+        LDEBUG("Partition::ParseXMLKey", "本行 start_sector=%d", pe->start_sector);
     }
 
     uint64_t partNum;
-    if (ParseXMLInt64(key, L"physical_partition_number", partNum, pe) != ERROR_SUCCESS) {
-        Log("physical_partition_number missing in XML line\n");
-        return ERROR_INVALID_DATA;
+    if (ParseXMLInt64(line, "physical_partition_number", partNum, pe) != ERROR_SUCCESS) {
+        LWARN("Partition::ParseXMLKey", "XML中的一行缺少physical_partition_number字段，返回ERROR_INVALID_DATA");
+        LWARN("Partition::ParseXMLKey", "原文内容:\n  %s\n", line.c_str());
     } else {
         pe->physical_partition_number = (uint8_t) partNum;
-        Log("physical_partition_number: %d ", pe->physical_partition_number);
+        LDEBUG("Partition::ParseXMLKey", "本行 physical_partition_number=%d", pe->physical_partition_number);
     }
 
-    if (ParseXMLInt64(key, L"num_partition_sectors", pe->num_sectors, pe) == ERROR_SUCCESS) {
-        Log("num_partition_sectors: %lld ", pe->num_sectors);
-        // If zero then write out all sectors for size of file
-    } else {
+    if (ParseXMLInt64(line, "num_partition_sectors", pe->num_sectors, pe) != ERROR_SUCCESS) {
         pe->num_sectors = (uint64_t) -1;
+        LWARN("Partition::ParseXMLKey", "XML中的一行缺少num_partition_sectors字段，默认使用UINT64_MAX");
+    } else {
+        LDEBUG("Partition::ParseXMLKey", "本行 num_partition_sectors=%d", pe->num_sectors);
     }
 
     if (pe->eCmd == CMD_PATCH || pe->eCmd == CMD_PROGRAM || pe->eCmd == CMD_READ) {
         // Both program and patch need a filename to be valid
-        if (ParseXMLString(key, L"filename", pe->filename) != ERROR_SUCCESS) {
-            Log("filename missing in XML line\n");
+        LDEBUG("Partition::ParseXMLKey", "解析patch, program或read的特有字段");
+
+        if (ParseXMLString(line, "filename", pe->filename) != ERROR_SUCCESS) {
+            LWARN("Partition::ParseXMLKey", "XML中的一行缺少filename字段，"
+                "无法为program, patch或read命令继续，返回ERROR_INVALID_DATA");
+            LWARN("Partition::ParseXMLKey", "原文内容:\n  %s\n", line.c_str());
             return ERROR_INVALID_DATA;
         } else {
-            // Only program if filename is specified
-            if (wcslen(pe->filename) == 0) {
+            if (pe->filename.empty()) {
                 pe->eCmd = CMD_NOP;
+                LWARN("Partition::ParseXMLKey", "XML中的一行filename字段为空，"
+                    "不执行任何操作，命令设置为CMD_NOP");
+                LWARN("Partition::ParseXMLKey", "原文内容:\n  %s\n", line.c_str());
                 return ERROR_SUCCESS;
             }
-            Log(L"filename: %ls ", pe->filename);
         }
 
         // File sector offset is optional for both these otherwise use default
-        if (ParseXMLInt64(key, L"file_sector_offset", pe->offset, pe) == ERROR_SUCCESS) {
-            Log("file_sector_offset: %lld ", pe->offset);
+        if (ParseXMLInt64(line, "file_sector_offset", pe->offset, pe) == ERROR_SUCCESS) {
+            LDEBUG("Partition::ParseXMLKey", "本行 file_sector_offset=%d", pe->offset);
         } else {
             pe->offset = (uint64_t) -1;
+            LDEBUG("Partition::ParseXMLKey", "XML中的一行缺少file_sector_offset字段，"
+                "默认使用UINT64_MAX");
         }
 
         // The following entries should only be used in patching
         if (pe->eCmd == CMD_PATCH) {
+            LDEBUG("Partition::ParseXMLKey", "解析patch命令的特有字段");
             // Get the value parameter
-            if (ParseXMLInt64(key, L"value", pe->patch_value, pe) == ERROR_SUCCESS) {
-                Log("value: %lld ", pe->patch_value);
+            if (ParseXMLInt64(line, "value", pe->patch_value, pe) == ERROR_SUCCESS) {
+                LDEBUG("Partition::ParseXMLKey", "本行 value=%d", pe->patch_value);
             } else {
-                Log("value missing in patch command\n");
+                LWARN("Partition::ParseXMLKey", "XML中的一行缺少patch命令的value字段，返回ERROR_INVALID_DATA");
+                LWARN("Partition::ParseXMLKey", "原文内容:\n  %s\n", line.c_str());
                 return ERROR_INVALID_DATA;
             }
-            Log("crc_size %d\n", (int) pe->crc_size);
+            LDEBUG("Partition::ParseXMLKey", "当前 crc_size=%d", (int) pe->crc_size);
 
-            // get BYTE offset for patch value to be written
-            if (ParseXMLInt64(key, L"byte_offset", pe->patch_offset, pe) == ERROR_SUCCESS) {
-                Log("patch_offset: %lld ", pe->patch_offset);
+            if (ParseXMLInt64(line, "byte_offset", pe->patch_offset, pe) == ERROR_SUCCESS) {
+                LDEBUG("Partition::ParseXMLKey", "本行 byte_offset=%d", pe->patch_offset);
             } else {
-                Log("byte_offset missing in patch command\n");
+                LWARN("Partition::ParseXMLKey", "XML中的一行缺少patch命令的byte_offset字段，返回ERROR_INVALID_DATA");
+                LWARN("Partition::ParseXMLKey", "原文内容:\n  %s\n", line.c_str());
                 return ERROR_INVALID_DATA;
             }
 
-            // Get the size of the patch in bytes
-            if (ParseXMLInt64(key, L"size_in_bytes", pe->patch_size, pe) == ERROR_SUCCESS) {
-                Log("patch_size: %lld ", pe->patch_size);
+            if (ParseXMLInt64(line, "size_in_bytes", pe->patch_size, pe) == ERROR_SUCCESS) {
+                LDEBUG("Partition::ParseXMLKey", "本行 size_in_bytes=%d", pe->patch_size);
             } else {
-                Log("size_in_bytes missing in patch command\n");
+                LWARN("Partition::ParseXMLKey", "XML中的一行缺少patch命令的size_in_bytes字段，返回ERROR_INVALID_DATA");
+                LWARN("Partition::ParseXMLKey", "原文内容:\n  %s\n", line.c_str());
                 return ERROR_INVALID_DATA;
             }
 
@@ -365,31 +313,30 @@ int Partition::ParseXMLKey(TCHAR* key, PartitionEntry* pe) {
 
 
 
-int Partition::ProgramPartitionEntry(Protocol* proto, PartitionEntry pe, TCHAR* key) {
-    UNREFERENCED_PARAMETER(key);
+int Partition::ProgramPartitionEntry(Protocol* proto, PartitionEntry pe, const string& key) {
     HANDLE hRead = INVALID_HANDLE_VALUE;
     bool bSparse = false;
     int status = ERROR_SUCCESS;
 
     if (proto == NULL) {
-        wprintf(L"Can't write to disk no protocol passed in.\n");
+        LWARN("Partition::ProgramPartitionEntry", "传入的Protocol指针为空，无法继续，返回ERROR_INVALID_PARAMETER");
         return ERROR_INVALID_PARAMETER;
     }
 
-    if (wcscmp(pe.filename, L"ZERO") == 0) {
-        wprintf(L"Zeroing out area\n");
+    if (pe.filename == "ZERO") {
+        LDEBUG("Partition::ProgramPartitionEntry", "当前filename为ZERO，擦除分区内容");
     } else {
-        // First check if the file is a sparse image then program via sparse
         SparseImage sparse;
         status = sparse.PreLoadImage(pe.filename);
         if (status == ERROR_SUCCESS) {
+            LDEBUG("Partition::ProgramPartitionEntry", "当前filename是稀疏文件");
             bSparse = true;
             status = sparse.ProgramImage(proto, pe.start_sector * proto->GetDiskSectorSize());
         } else {
-            wprintf(L"\nSparse image not detected -- loading binary\n");
+            LDEBUG("Partition::ProgramPartitionEntry", "当前filename不是ZERO且不是稀疏文件");
             // Open the file that we are supposed to dump
             status = ERROR_SUCCESS;
-            hRead = CreateFile(pe.filename,
+            hRead = CreateFileA(pe.filename.c_str(),
                 GENERIC_READ,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 NULL,
@@ -408,7 +355,8 @@ int Partition::ProgramPartitionEntry(Protocol* proto, PartitionEntry pe, TCHAR* 
                 if (dwTotalSize <= (int64_t) pe.num_sectors) {
                     pe.num_sectors = dwTotalSize;
                 } else {
-                    wprintf(L"\nFileSize is > partition size, truncating file\n");
+                    LWARN("Partition::ProgramPartitionEntry", "指定的分区扇区数(%llu)小于文件实际所需扇区数(%llu)，"
+                        "将使用实际所需扇区数", pe.num_sectors, dwTotalSize);
                 }
                 status = ERROR_SUCCESS;
             }
@@ -417,8 +365,17 @@ int Partition::ProgramPartitionEntry(Protocol* proto, PartitionEntry pe, TCHAR* 
 
     if (status == ERROR_SUCCESS && !bSparse) {
         // Fast copy from input file to output disk
-        wprintf(L"In offset: %llu out offset: %llu sectors: %llu\n", pe.offset, pe.start_sector, pe.num_sectors);
+        LDEBUG("Partition::ProgramPartitionEntry", "输入偏移: %llu 输出偏移: %llu 扇区数: %llu", pe.offset, pe.start_sector, pe.num_sectors);
+        LDEBUG("Partition::ProgramPartitionEntry", "开始使用FastCopy写入分区数据");
+        LDEBUG("Partition::ProgramPartitionEntry", "参数：offset=%llu start_sector=%llu num_sectors=%llu",
+            pe.offset, pe.start_sector, pe.num_sectors);
         status = proto->FastCopy(hRead, pe.offset, proto->GetDiskHandle(), pe.start_sector, pe.num_sectors, pe.physical_partition_number);
+        if (status != ERROR_SUCCESS) {
+            LWARN("Partition::ProgramPartitionEntry", "FastCopy写入分区数据失败，状态：%s",
+            getErrorDescription(status).c_str());
+        } else {
+            LDEBUG("Partition::ProgramPartitionEntry", "FastCopy写入分区数据成功");
+        }
         CloseHandle(hRead);
     }
     return status;
@@ -428,9 +385,10 @@ int Partition::ProgramImage(Protocol* proto) {
     int status = ERROR_SUCCESS;
 
     PartitionEntry pe;
-    TCHAR keyName[MAX_STRING_LEN];
-    TCHAR* key;
-    while (GetNextXMLKey(keyName, &key) == ERROR_SUCCESS) {
+    string key;
+    string keyName;
+    string line;
+    while (GetNextXMLKey(keyName, key) == ERROR_SUCCESS) {
         // parse the XML key if we don't understand it then continue
         if (ParseXMLKey(key, &pe) != ERROR_SUCCESS) {
             // If we don't understand the command just try sending it otherwise ignore command
@@ -441,31 +399,32 @@ int Partition::ProgramImage(Protocol* proto) {
             status = ProgramPartitionEntry(proto, pe, key);
         } else if (pe.eCmd == CMD_PATCH) {
             // Only patch disk entries
-            if (wcscmp(pe.filename, L"DISK") == 0) {
+            if (pe.filename == "DISK") {
                 status = proto->ProgramPatchEntry(pe, key);
             }
         } else if (pe.eCmd == CMD_READ) {
-            status = proto->DumpDiskContents(pe.start_sector, pe.num_sectors, pe.filename, pe.physical_partition_number, NULL);
+            // status = proto->DumpDiskContents(pe.start_sector, pe.num_sectors, pe.filename, pe.physical_partition_number, NULL);
+            status = proto->DumpDiskContents(pe.start_sector, pe.num_sectors, 
+                pe.filename, pe.physical_partition_number);
         } else if (pe.eCmd == CMD_ZEROOUT) {
-            status = proto->WipeDiskContents(pe.start_sector, pe.num_sectors, NULL);
+            status = proto->WipeDiskContents(pe.start_sector, pe.num_sectors);
         }
 
         if (status != ERROR_SUCCESS) {
             break;
         }
     }
-
     CloseXML();
     return status;
 }
 
-int Partition::PreLoadImage(TCHAR* fname) {
+int Partition::PreLoadImage(const string& fname) {
     HANDLE hXML;
     int status = ERROR_SUCCESS;
     xmlStart = NULL;
 
     // Open the XML file and read into RAM
-    hXML = CreateFile(fname,
+    hXML = CreateFileA(fname.c_str(),
         GENERIC_READ,
         FILE_SHARE_READ,
         NULL,
@@ -483,11 +442,12 @@ int Partition::PreLoadImage(TCHAR* fname) {
     // Make sure filesize is valid
     if (xmlSize == INVALID_FILE_SIZE) {
         CloseHandle(hXML);
+        LWARN("Partition::PreLoadImage", "无效的文件大小, 返回INVALID_FILE_SIZE");
         return INVALID_FILE_SIZE;
     }
 
     char* xmlTmp = (char*) malloc(xmlSize);
-    xmlStart = (TCHAR*) malloc((xmlSize + 2) * sizeof(TCHAR));
+    xmlStart = (char*) malloc(xmlSize + 2);
     xmlEnd = xmlStart + xmlSize;
     keyStart = xmlStart;
 
@@ -507,7 +467,9 @@ int Partition::PreLoadImage(TCHAR* fname) {
     // If successful then prep the buffer
     if (status == ERROR_SUCCESS) {
 
-        mbstowcs_s(&sizeOut, xmlStart, xmlSize + 2, xmlTmp, xmlSize);
+        memcpy(xmlStart, xmlTmp, xmlSize);
+        xmlStart[xmlSize] = '\0';
+        xmlStart[xmlSize + 1] = '\0';
 
         // skip over xml header should be <?xml....?>
         for (keyStart = xmlStart;keyStart < xmlEnd;) {
@@ -517,65 +479,51 @@ int Partition::PreLoadImage(TCHAR* fname) {
         for (;keyStart < xmlEnd;) {
             if ((*keyStart++ == '?') && (*keyStart++ == '>')) break;
         }
-
-        // skip the data header for now as hack until we support embedded content
         for (;keyStart < xmlEnd;) {
             if (*keyStart++ == '>') break;
         }
-
     }
-
-    // Copied this over to wchar buffer free temp buffer 
     if (xmlTmp != NULL) free(xmlTmp);
-
     return status;
 }
 
-int Partition::CloseXML(void) {
-    // Free the RAM buffer for storing the XML data
+int Partition::CloseXML() {
     if (xmlStart != NULL) {
-        delete[] xmlStart;
+        free(xmlStart);
         xmlStart = NULL;
         xmlEnd = NULL;
         keyStart = NULL;
         keyEnd = NULL;
     }
-
     return ERROR_SUCCESS;
 }
 
-int Partition::GetNextXMLKey(TCHAR* keyName, TCHAR** key) {
+
+int Partition::GetNextXMLKey(string& keyName, string& key) {
     bool bRecordKey = true;
-    // Find < and make sure it's not a comment
     for (;(keyStart < xmlEnd) && bRecordKey; keyStart++) {
-        // Check for starting of a comment
         if (*keyStart == '<' && *(keyStart + 1) == '!' && *(keyStart + 2) == '-' && *(keyStart + 3) == '-') {
-            // This is a comment search for the closing -->
             for (;keyStart < xmlEnd;keyStart++) {
                 if (*keyStart == '-' && *(keyStart + 1) == '-' && *(keyStart + 2) == '>') break;
             }
         } else if (*keyStart == '<') {
-            // suck in the keyname up to MAX_STRING_LEN
-            // go past until we hit alpha numeric value
-            for (keyEnd = keyStart; !iswalnum(*keyEnd); keyEnd++);
+            for (keyEnd = keyStart; !isalnum(*keyEnd); keyEnd++);
             for (;keyEnd < xmlEnd; keyEnd++) {
                 if (*keyEnd == '>' && *(keyEnd - 1) == '/') {
-                    // TODO:FIXME handle multiple embedded parameters
                     break;
                 } else if (bRecordKey) {
-                    if (iswalnum(*keyEnd)) *keyName++ = *keyEnd;
+                    if (isalnum(*keyEnd)) keyName += *keyEnd;
                     else bRecordKey = false;
-                    *keyName = 0;
                 }
             }
         }
     }
-
-    // Terminate this string for searches on it
     if (keyStart < xmlEnd) {
         *keyEnd = 0;
-        *key = keyStart - 1;
+        key = std::string(keyStart, keyEnd - keyStart);
         return ERROR_SUCCESS;
     }
+
     return ERROR_END_OF_MEDIA;
 }
+

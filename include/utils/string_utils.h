@@ -104,7 +104,7 @@ namespace string_utils {
     std::string demangle(const std::type_info& ti);
 
     /**
-     * 将一个任意类型的值转化为字符串。
+     * 将一个any类型的值转化为字符串。
      * @param value 要转化的值
      * @param format_str 格式化字符串
      * @return 转化后的字符串
@@ -183,7 +183,6 @@ namespace string_utils {
      */
     int64_t calc_expr(std::string expr,
             const std::unordered_map<std::string, int64_t>& vars = std::unordered_map<std::string, int64_t>());
-
 
 
 }

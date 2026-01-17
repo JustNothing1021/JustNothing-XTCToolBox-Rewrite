@@ -26,12 +26,20 @@ string strftime_expand(const string& fmt, const tm& tm) {
 string time_utils::get_formatted_time_with_frac(double time, string fmt, int precision) {
     time_t sec = static_cast<time_t>(time);
     double frac = abs(time - sec);
-    tm tm_time;
-#if defined(_WIN32) || defined(_WIN64)
-    localtime_s(&tm_time, &sec);
-#else
-    localtime_r(&sec, &tm_time);
-#endif
+    
+    // 使用 C++17 的 std::localtime，避免平台差异
+    std::tm tm_time;
+    auto time_ptr = std::localtime(&sec);
+    if (time_ptr) {
+        tm_time = *time_ptr;
+    } else {
+        // 如果获取时间失败，使用当前时间
+        time_t now = std::time(nullptr);
+        time_ptr = std::localtime(&now);
+        if (time_ptr) {
+            tm_time = *time_ptr;
+        }
+    }
 
     // 先格式化主串
 
@@ -55,12 +63,21 @@ string time_utils::get_formatted_time_with_frac(double time, string fmt, int pre
 
 string time_utils::get_formatted_time(double time, const string& fmt) {
     time_t sec = static_cast<time_t>(time);
-    tm tm_time;
-#if defined(_WIN32) || defined(_WIN64)
-    localtime_s(&tm_time, &sec);
-#else
-    localtime_r(&sec, &tm_time);
-#endif
+    
+    // 使用 C++17 的 std::localtime，避免平台差异
+    std::tm tm_time;
+    auto time_ptr = std::localtime(&sec);
+    if (time_ptr) {
+        tm_time = *time_ptr;
+    } else {
+        // 如果获取时间失败，使用当前时间
+        time_t now = std::time(nullptr);
+        time_ptr = std::localtime(&now);
+        if (time_ptr) {
+            tm_time = *time_ptr;
+        }
+    }
+    
     return strftime_expand(fmt, tm_time);
 }
 

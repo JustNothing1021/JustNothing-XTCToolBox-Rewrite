@@ -21,6 +21,7 @@
  =============================================================================*/
 
 #include "tchar.h"
+#include "utils/logger.h"
 #include "emmcdl/dload.h"
 #include "emmcdl/partition.h"
 #include "emmcdl/diskwriter.h"
@@ -77,7 +78,7 @@ int Dload::ConnectToFlashProg(BYTE ver) {
     }
 
 
-    printf("Got hello response\n");
+    LDEBUG("Dload::IsDeviceInDload", "收到Hello响应");
     for (; i < 10; i++) {
         rspSize = sizeof(rsp);
         sport->SendSync(security, sizeof(security), rsp, &rspSize);
@@ -146,7 +147,7 @@ int Dload::OpenPartition(int partition) {
     rspSize = sizeof(rsp);
     sport->SendSync(openmulti, sizeof(openmulti), rsp, &rspSize);
     if ((rspSize == 0) || (rsp[0] != EHOST_OPEN_MULTI_RSP)) {
-        wprintf(L"Could not open partition\n");
+        LWARN("Dload::OpenPartition", "无法打开分区");
         return ERROR_INVALID_HANDLE;
     }
 
@@ -202,19 +203,19 @@ int Dload::FastCopySerial(HANDLE hInFile, uint32_t offset, uint32_t sectors) {
 
             sport->SendSync(streamwrite, bytesRead + 5, rsp, &rspSize);
             if ((rspSize == 0) || (rsp[0] != EHOST_STREAM_WRITE_RSP)) {
-                wprintf(L"Device returned error: %d\n", rsp[0]);
+                LWARN("Dload::WriteSectors", "设备返回错误: %d", rsp[0]);
                 if (rsp[0] == EHOST_LOG && rspSize >= 2) {
                     rsp[rspSize - 2] = 0;
-                    printf((char*) &rsp[1]);
+                    LDEBUG("Dload::WriteSectors", "设备日志: %s", (char*) &rsp[1]);
                 }
                 status = ERROR_WRITE_FAULT;
             }
             if (bSectorAddress) {
                 offset += bytesRead / SECTOR_SIZE;
-                wprintf(L"Destination sector: %d\r", (int) offset);
+                LDEBUG("Dload::WriteSectors", "目标扇区: %d", (int) offset);
             } else {
                 offset += bytesRead;
-                wprintf(L"Destination offset: %d\r", (int) offset);
+                LDEBUG("Dload::WriteSectors", "目标偏移: %d", (int) offset);
             }
         } else {
             // If we didn't read anything then break
@@ -222,7 +223,7 @@ int Dload::FastCopySerial(HANDLE hInFile, uint32_t offset, uint32_t sectors) {
         }
     }
 
-    printf("\n");
+    LDEBUG("Dload::WriteSectors", "数据传输完成");
 
     // If we hit end of file that means we sent it all
     if (status == ERROR_HANDLE_EOF) status = ERROR_SUCCESS;
@@ -235,7 +236,7 @@ int Dload::LoadImageFile(TCHAR* szSingleImage) {
 
     hFile = CreateFile(szSingleImage, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
-        wprintf(L"Filename not found %ls\n", szSingleImage);
+        LWARN("Dload::LoadSingleImage", "文件未找到: %s", string_utils::wstr2str(szSingleImage).c_str());
         return ERROR_INVALID_HANDLE;
     }
 
@@ -332,7 +333,7 @@ int Dload::LoadFlashProg(TCHAR* szFlashPrg) {
 
     if (status == ERROR_SUCCESS) {
         BYTE gocmd[5] = { CMD_GO,0 };
-        printf("sending go command 0x%x\n", (uint32_t) goAddr);
+        LDEBUG("Dload::LoadFlashProg", "发送GO命令到地址: 0x%x", (uint32_t) goAddr);
         gocmd[1] = (goAddr >> 24) & 0xff;
         gocmd[2] = (goAddr >> 16) & 0xff;
         gocmd[3] = (goAddr >> 8) & 0xff;
@@ -458,7 +459,7 @@ int Dload::ProgramPartitionEntry(PartitionEntry pe) {
     HANDLE hInFile = INVALID_HANDLE_VALUE;
 
     if (wcscmp(pe.filename, L"ZERO") == 0) {
-        wprintf(L"Zeroing out area\n");
+        LINFO("Dload::ProgramPartitionEntry", "正在擦除分区内容");
     } else {
         // Open the file that we are supposed to dump
         hInFile = CreateFile(pe.filename,
@@ -478,7 +479,7 @@ int Dload::ProgramPartitionEntry(PartitionEntry pe) {
 
     if (status == ERROR_SUCCESS) {
         // Fast copy from input file to Serial port
-        wprintf(L"\nIn offset: %lld out offset: %lld sectors: %lld\n", pe.offset, pe.start_sector, pe.num_sectors);
+        LDEBUG("Dload::ProgramPartitionEntry", "输入偏移: %lld 输出偏移: %lld 扇区数: %lld", pe.offset, pe.start_sector, pe.num_sectors);
         status = FastCopySerial(hInFile, (uint32_t) pe.start_sector, (uint32_t) pe.num_sectors);
     }
 
@@ -500,10 +501,10 @@ int Dload::WriteRawProgramFile(TCHAR* szXMLFile) {
     Partition* p;
     p = new Partition(GetNumDiskSectors());
 
-    wprintf(L"Parsing partition table: %ls\n", szXMLFile);
+    LINFO("Dload::WriteRawProgramFile", "正在解析分区表: %ls", szXMLFile);
     status = p->PreLoadImage(szXMLFile);
     if (status != ERROR_SUCCESS) {
-        wprintf(L"Partition table failed to load\n");
+        LERROR("Dload::WriteRawProgramFile", "分区表加载失败");
         delete p;
         return status;
     }

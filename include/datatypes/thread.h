@@ -94,16 +94,59 @@ private:
     }
 
 public:
-
-    static std::function<void(Thread*)> onStartingRunningThread;    // 试图启动一个已经在运行的线程
-    static std::function<void(Thread*)> onStoppingStoppedThread;    // 试图停止一个已经停止的线程
-    static std::function<void(Thread*)> onTerminatingStoppedThread; // 试图强制终止一个已经停止的线程
-    static std::function<void(Thread*)> onGetIdFailed;              // 获取线程ID失败
-    static std::function<void(Thread*)> onStartingNullTask;         // 试图启动一个空任务的线程
-    static std::function<void(Thread*)> onForceTerminate;           // 强制终止线程的回调
-
-    // 构造函数。
-    Thread() : state(ThreadState::IDLE), stopRequested(false) {}
+    // 错误处理回调函数类型
+    using ErrorCallback = std::function<void(Thread*, const std::string&)>;
+    
+    // 实例级别的错误处理回调函数
+    ErrorCallback onStartingRunningThread;    // 试图启动一个已经在运行的线程
+    ErrorCallback onStoppingStoppedThread;    // 试图停止一个已经停止的线程
+    ErrorCallback onTerminatingStoppedThread; // 试图强制终止一个已经停止的线程
+    ErrorCallback onStartingNullTask;         // 试图启动一个没有任务的线程
+    ErrorCallback onForceTerminate;           // 强制终止线程
+    ErrorCallback onGetIdFailed;              // 获取线程ID失败
+    
+    /**
+     * 构造函数
+     */
+    Thread() : state(ThreadState::IDLE), stopRequested(false) {
+        // 设置默认的错误处理回调
+        setDefaultErrorCallbacks();
+    }
+    
+    /**
+     * 设置默认的错误处理回调
+     */
+    void setDefaultErrorCallbacks() {
+        onStartingRunningThread = [](Thread* pt, const std::string& msg) {
+            fprintf(stderr, "Warning: Attempt to start a running thread Thread(%p) - %s\n", 
+                    pt, msg.c_str());
+        };
+        
+        onStoppingStoppedThread = [](Thread* pt, const std::string& msg) {
+            fprintf(stderr, "Warning: Attempt to stop a stopped thread Thread(%p) - %s\n", 
+                    pt, msg.c_str());
+        };
+        
+        onTerminatingStoppedThread = [](Thread* pt, const std::string& msg) {
+            fprintf(stderr, "Warning: Attempt to terminate a stopped thread Thread(%p) - %s\n", 
+                    pt, msg.c_str());
+        };
+        
+        onStartingNullTask = [](Thread* pt, const std::string& msg) {
+            fprintf(stderr, "Warning: Attempt to start a thread with null task Thread(%p) - %s\n", 
+                    pt, msg.c_str());
+        };
+        
+        onForceTerminate = [](Thread* pt, const std::string& msg) {
+            fprintf(stderr, "Warning: Force terminating thread Thread(%p) - %s\n", 
+                    pt, msg.c_str());
+        };
+        
+        onGetIdFailed = [](Thread* pt, const std::string& msg) {
+            fprintf(stderr, "Warning: Thread(%p) getId() failed - %s\n", 
+                    pt, msg.c_str());
+        };
+    }
 
     /**
      * 构造函数。
@@ -166,7 +209,7 @@ public:
         ThreadState currentState = state;
         if (currentState == ThreadState::RUNNING) {
             if (onStartingRunningThread) {
-                onStartingRunningThread(this);
+                onStartingRunningThread(this, "Thread is already running");
             }
             return false;
         }
@@ -175,7 +218,7 @@ public:
 
         if (!task) {
             if (onStartingNullTask) 
-                onStartingNullTask(this);
+                onStartingNullTask(this, "No task provided for thread");
             return false;
         }
 
@@ -229,7 +272,7 @@ public:
 
         if (state == ThreadState::IDLE || state == ThreadState::STOPPED) {
             if (onTerminatingStoppedThread)
-                onTerminatingStoppedThread(this);
+                onTerminatingStoppedThread(this, "Thread is already stopped");
             return;
         }
 
@@ -252,9 +295,9 @@ public:
         
         if (state == ThreadState::IDLE || state == ThreadState::STOPPED) {
             if (onTerminatingStoppedThread) {
-                onTerminatingStoppedThread(this);
+                onTerminatingStoppedThread(this, "Thread is already stopped");
             }
-            return true;
+            return false;
         }
 
         if (!worker.joinable()) {
@@ -287,7 +330,7 @@ public:
 #endif
 
         if (onForceTerminate)
-            onForceTerminate(this);
+            onForceTerminate(this, success ? "Thread force terminated successfully" : "Thread force termination failed");
         
         return success;
     }
@@ -325,7 +368,7 @@ public:
         }
         if (onGetIdFailed) {
             // 这里需要去掉const，但是具体为啥我也不知道（可能是const？）
-            onGetIdFailed(const_cast<Thread*>(this));
+            onGetIdFailed(const_cast<Thread*>(this), "Thread is not running or already stopped");
         }
         return std::thread::id();
     }
