@@ -159,8 +159,11 @@ string string_utils::format(const char* format, ...) {
 string string_utils::format_with_map(const string& fmtstr, const unordered_map<string, any>& params) {
     static const regex re(R"(\{([a-zA-Z0-9_]+)(?::([^}]+))?\})");
     string result;
+    result.reserve(fmtstr.size() * 2); // 预分配空间，减少重新分配
+    
     size_t last = 0;
     auto end = sregex_iterator();
+    
     for (auto it = sregex_iterator(fmtstr.begin(), fmtstr.end(), re); it != end; ++it) {
         auto match = *it;
         result.append(fmtstr, last, match.position() - last);
@@ -171,11 +174,13 @@ string string_utils::format_with_map(const string& fmtstr, const unordered_map<s
             result += format_any(param->second, fmt);
         } else {
             // 未知参数按原样输出
-            result += match.str();
+            result.append(match.str());
         }
         last = match.position() + match.length();
     }
     result.append(fmtstr, last, string::npos);
+    
+    result.shrink_to_fit(); // 释放多余内存
     return result;
 }
 

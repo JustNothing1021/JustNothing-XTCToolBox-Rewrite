@@ -16,6 +16,8 @@
 #include <iostream>
 #include <filesystem>
 #include <functional>
+#include <queue>
+#include <atomic>
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/printf.h>
@@ -25,8 +27,10 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <shared_mutex>
 #else
 #include <unistd.h>
+#include <shared_mutex>
 #endif
 
 #ifdef ERROR
@@ -130,6 +134,18 @@ namespace log_utils {
 
             bool operator!=(const LogLevel& other) const {
                 return level_id != other.level_id;
+            }
+
+            /**
+             * 默认构造函数。
+             */
+            LogLevel() : level_id(0), 
+                        level_name("UNKNOWN"), 
+                        display_name("UNK"),
+                        time_display_color(fmt::fg(fmt::color::white)),
+                        level_display_color(fmt::fg(fmt::color::white)),
+                        source_display_color(fmt::fg(fmt::color::white)),
+                        message_display_color(fmt::fg(fmt::color::white)) {
             }
 
             /**
@@ -322,7 +338,121 @@ namespace log_utils {
         static uint64_t log_file_max_count; // 日志文件保留数量
         static Initializer initializer; // 初始化器
         static std::vector<LogHandler*> handlers; // 日志处理器
-        static std::mutex log_mutex; // 日志互斥锁
+        static std::mutex log_mutex; // 日志互斥锁（向后兼容）
+        static std::shared_mutex log_rw_mutex; // 读写锁，用于优化多线程性能
+
+        // 日志消息结构体
+        struct LogMessage {
+            LogLevel level;
+            std::string source;
+            std::string file;
+            int line;
+            std::string message;
+            double timestamp;
+            LogMessage* next; // 用于内存池的链表指针
+            
+            // 构造函数
+            LogMessage() : line(0), timestamp(0), next(nullptr) {}
+            
+            // 重置函数，用于内存池回收时清理资源
+            void reset() {
+                source.clear();
+                file.clear();
+                message.clear();
+                next = nullptr;
+            }
+        };
+        
+        // 简单的内存池实现
+        class LogMessagePool {
+        public:
+            LogMessagePool(size_t initial_size = 1000, size_t max_size = 10000) 
+                : m_initial_size(initial_size), m_max_size(max_size), m_free_count(0), m_total_count(0) {
+                // 预分配初始数量的对象
+                for (size_t i = 0; i < initial_size; ++i) {
+                    LogMessage* msg = new LogMessage();
+                    msg->next = m_free_list;
+                    m_free_list = msg;
+                    m_free_count++;
+                    m_total_count++;
+                }
+            }
+            
+            ~LogMessagePool() {
+                // 释放所有对象
+                while (m_free_list) {
+                    LogMessage* msg = m_free_list;
+                    m_free_list = msg->next;
+                    delete msg;
+                }
+            }
+            
+            // 分配对象
+            LogMessage* allocate() {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                
+                if (m_free_list) {
+                    // 从空闲列表中获取对象
+                    LogMessage* msg = m_free_list;
+                    m_free_list = msg->next;
+                    m_free_count--;
+                    return msg;
+                } else if (m_total_count < m_max_size) {
+                    // 分配新对象
+                    LogMessage* msg = new LogMessage();
+                    m_total_count++;
+                    return msg;
+                }
+                
+                // 内存池已满，返回nullptr
+                return nullptr;
+            }
+            
+            // 回收对象
+            void deallocate(LogMessage* msg) {
+                if (!msg) return;
+                
+                std::lock_guard<std::mutex> lock(m_mutex);
+                
+                // 重置对象
+                msg->reset();
+                
+                // 将对象添加到空闲列表
+                msg->next = m_free_list;
+                m_free_list = msg;
+                m_free_count++;
+            }
+            
+            // 获取当前可用对象数量
+            size_t getFreeCount() const {
+                return m_free_count;
+            }
+            
+            // 获取总分配对象数量
+            size_t getTotalCount() const {
+                return m_total_count;
+            }
+            
+        private:
+            size_t m_initial_size; // 初始大小
+            size_t m_max_size; // 最大大小
+            LogMessage* m_free_list = nullptr; // 空闲对象链表
+            size_t m_free_count; // 空闲对象数量
+            size_t m_total_count; // 总对象数量
+            std::mutex m_mutex; // 互斥锁
+        };
+        
+        static bool use_async; // 是否使用异步日志
+        static std::queue<LogMessage*> log_queue; // 日志消息队列（使用指针）
+        static LogMessagePool msg_pool; // 日志消息内存池
+        static std::mutex queue_mutex; // 队列互斥锁
+        static std::condition_variable queue_cond; // 队列条件变量
+        static std::thread async_thread; // 异步处理线程
+        static std::atomic<bool> async_running; // 异步线程是否运行
+        static size_t batch_size; // 批量处理大小
+        static size_t queue_max_size; // 队列最大大小
+        static std::atomic<uint64_t> dropped_logs; // 丢弃的日志数量
+        static std::atomic<uint64_t> pool_misses; // 内存池未命中次数
 
         const static LogLevel UNKNOWN;  // 未知类型
         const static LogLevel TRACE;    // 调试到追踪每一步
@@ -367,7 +497,29 @@ namespace log_utils {
          */
         static bool setLogFile(const std::string& file, bool append = true);
 
+        /**
+         * 设置是否使用异步日志。
+         * @param async 是否使用异步日志
+         */
+        static void setAsync(bool async);
 
+        /**
+         * 获取当前丢弃的日志数量。
+         * @return 丢弃的日志数量
+         */
+        static uint64_t getDroppedLogs();
+
+        /**
+         * 设置批量处理大小。
+         * @param size 批量大小
+         */
+        static void setBatchSize(size_t size);
+
+        /**
+         * 设置队列最大大小。
+         * @param size 队列大小
+         */
+        static void setQueueMaxSize(size_t size);
 
         /**
          * 记录一行日志。
