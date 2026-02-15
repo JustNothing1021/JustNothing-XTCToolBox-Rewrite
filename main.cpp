@@ -69,7 +69,9 @@ public:
     }
 
     ~MainWindow() {
+        updatePortListTimer->stop();
         delete updatePortListTimer;
+        updateWindowTimer->stop();
         delete updateWindowTimer;
     }
 
@@ -303,15 +305,13 @@ public:
             }
         } else {
             if (!isFirstComboBoxUpdate) {
-                LWARN("MainWindow::updateComboBox",
-                    fmt::format("之前选择的端口 (COM{}) 不再可用，重置为未选择状态", selectedPort));
+                LWARN("MainWindow::updateComboBox", "之前选择的端口 (COM%d) 不再可用，重置为未选择状态", selectedPort);
                 isRefreshingComboBox = false;
                 comboBox->setCurrentIndex(0);
             }
         }
         isFirstComboBoxUpdate = false;
         isRefreshingComboBox = false;
-
     }
 
     int getSelectedPort() {
@@ -320,15 +320,10 @@ public:
 };
 
 int main(int argc, char* argv[]) {
-    #if 1
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName("串口调试工具");
     QCoreApplication::setApplicationVersion("11.45.14");
     MainWindow mainWindow;
     mainWindow.show();
     return app.exec();
-    #else
-    return emmcdl_main(argc, argv);
-    #endif
-    return 0;
 }

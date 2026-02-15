@@ -2,6 +2,8 @@
 
 # 测试文件
 /.vscode/
+/.cache/
+/tests/
 /build/
 /log/
 /demos/

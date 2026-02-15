@@ -94,6 +94,18 @@ string string_utils::format_any(const any& value, const string& format_str) {
     };
 
     try {
+        try {
+            return format_str.empty() ? any_cast<string>(value) : fmt::format("{:" + format_str + "}", any_cast<string>(value));
+        } catch (...) {}
+        try {
+            const char* s = any_cast<const char*>(value);
+            return format_str.empty() ? string(s) : fmt::format("{:" + format_str + "}", s);
+        } catch (...) {}
+        try {
+            std::string_view sv = any_cast<std::string_view>(value);
+            return format_str.empty() ? string(sv) : fmt::format("{:" + format_str + "}", string(sv));
+        } catch (...) {}
+
         auto it = type_formatters.find(type_index(value.type()));
         if (it != type_formatters.end()) {
             return it->second(value, format_str);
@@ -129,9 +141,14 @@ string string_utils::format_any(const any& value, const string& format_str) {
         cerr << "格式化对象出错: 未知错误" << endl;
     }
 
-    // 默认格式化
     try {
-        return fmt::format("<{} object at 0x{:016x}>", demangle(value.type()), (uint64_t) (void*) &value);
+        try {
+            std::ostringstream oss;
+            oss << "<" << demangle(value.type()) << " object at 0x" << std::hex << (uint64_t)(uintptr_t)&value << ">";
+            return oss.str();
+        } catch (...) {
+            return fmt::format("<{} object at 0x{:016x}>", demangle(value.type()), (uint64_t) (void*) &value);
+        }
     } catch (...) {
         return fmt::format("<{} (mangled) object at 0x{:016x}>", value.type().name(), (uint64_t) (void*) &value);
     }
@@ -157,30 +174,59 @@ string string_utils::format(const char* format, ...) {
 
 
 string string_utils::format_with_map(const string& fmtstr, const unordered_map<string, any>& params) {
-    static const regex re(R"(\{([a-zA-Z0-9_]+)(?::([^}]+))?\})");
+
     string result;
-    result.reserve(fmtstr.size() * 2); // 预分配空间，减少重新分配
-    
-    size_t last = 0;
-    auto end = sregex_iterator();
-    
-    for (auto it = sregex_iterator(fmtstr.begin(), fmtstr.end(), re); it != end; ++it) {
-        auto match = *it;
-        result.append(fmtstr, last, match.position() - last);
-        string key = match[1];
-        string fmt = match[2];
-        auto param = params.find(key);
-        if (param != params.end()) {
-            result += format_any(param->second, fmt);
+    result.reserve(fmtstr.size() * 2);
+
+    size_t i = 0;
+    const size_t n = fmtstr.size();
+    while (i < n) {
+        char c = fmtstr[i];
+        if (c == '{') {
+            size_t start = i + 1;
+            size_t j = start;
+            while (j < n && fmtstr[j] != '}') ++j;
+            if (j >= n) {
+                // 没有配对的 '}', 把剩余全部追加并退出
+                result.append(fmtstr, i, string::npos);
+                break;
+            }
+
+            string inside = fmtstr.substr(start, j - start);
+            string key;
+            string fmt;
+            size_t colon = inside.find(':');
+            if (colon == string::npos) key = inside; else { key = inside.substr(0, colon); fmt = inside.substr(colon + 1); }
+
+            if (key.empty()) {
+                result.append(fmtstr, i, j - i + 1);
+                i = j + 1;
+                continue;
+            }
+
+            auto it = params.find(key);
+            if (it != params.end()) {
+                try {
+                    result += format_any(it->second, fmt);
+                } catch (...) {
+                    result.append(fmtstr, i, j - i + 1);
+                }
+            } else {
+                result.append(fmtstr, i, j - i + 1);
+            }
+
+            i = j + 1;
+        } else if (c == '}') {
+            result.push_back('}');
+            ++i;
         } else {
-            // 未知参数按原样输出
-            result.append(match.str());
+            size_t j = i;
+            while (j < n && fmtstr[j] != '{' && fmtstr[j] != '}') ++j;
+            result.append(fmtstr, i, j - i);
+            i = j;
         }
-        last = match.position() + match.length();
     }
-    result.append(fmtstr, last, string::npos);
-    
-    result.shrink_to_fit(); // 释放多余内存
+    result.shrink_to_fit();
     return result;
 }
 

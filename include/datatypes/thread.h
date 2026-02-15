@@ -262,35 +262,12 @@ public:
         return true;
     }
 
-    /**
-     * 终止线程（强制停止）。
-     * 只是将线程分离，不保证线程立即停止。
-     * 可能会导致资源泄漏，谨慎使用。
-     */
-    void terminate() {
-        std::lock_guard<std::mutex> lock(taskMutex);
-
-        if (state == ThreadState::IDLE || state == ThreadState::STOPPED) {
-            if (onTerminatingStoppedThread)
-                onTerminatingStoppedThread(this, "Thread is already stopped");
-            return;
-        }
-
-        stopRequested = true;
-        state = ThreadState::TERMINATED;
-
-        if (worker.joinable()) {
-            // 注意：std::thread 没有原生的终止方法
-            // 在实际应用中，可能需要平台特定的方法
-            worker.detach(); // 分离线程，让它自行结束
-        }
-    }
 
     /**
      * 使用平台特定的API强制杀死线程。
      * 警告：可能导致资源泄漏和数据不一致。
      */
-    bool forceTerminate() {
+    bool terminate() {
         std::lock_guard<std::mutex> lock(taskMutex);
         
         if (state == ThreadState::IDLE || state == ThreadState::STOPPED) {
@@ -413,7 +390,6 @@ public:
         return stopRequested;
     }
 };
-
 
 
 DATATYPES_NAMESPACE_END

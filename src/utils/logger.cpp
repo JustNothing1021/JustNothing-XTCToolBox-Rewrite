@@ -27,6 +27,7 @@ size_t Logger::queue_max_size = 10000;
 std::atomic<uint64_t> Logger::dropped_logs(0);
 std::atomic<uint64_t> Logger::pool_misses(0);
 
+
 const string Logger::LogHandlerFormatMapping::LOG_TIME = "log_time_str";
 const string Logger::LogHandlerFormatMapping::LOG_TIMESTAMP = "log_timestamp";
 const string Logger::LogHandlerFormatMapping::LOG_LEVEL_DISPLAY_NAME = "log_level_display_name";
@@ -48,37 +49,7 @@ const string Logger::LogHandlerFormatMapping::LOG_LEVEL_MESSAGE_COLOR = "{log_le
 const string Logger::LogHandlerFormatMapping::LOG_CUSTOM_COLOR = "{log_custom_color}";
 const string Logger::LogHandlerFormatMapping::LOG_COLOR_END = "{log_color_end}";
 
-Logger::LogHandler* stdout_handler = new Logger::LogHandler(
-    "stdout", stdout, Logger::TRACE,
-    fmt::format(
-        "{}{{{}}}{} {{{}}} {}{{{}:<35}} {}{{{}}}\n",
-        Logger::LogHandlerFormatMapping::LOG_LEVEL_TIME_COLOR,
-        Logger::LogHandlerFormatMapping::LOG_TIME,
-        Logger::LogHandlerFormatMapping::LOG_LEVEL_COLOR,
-        Logger::LogHandlerFormatMapping::LOG_LEVEL_DISPLAY_NAME,
-        Logger::LogHandlerFormatMapping::LOG_LEVEL_SOURCE_COLOR,
-        Logger::LogHandlerFormatMapping::LOG_SOURCE,
-        Logger::LogHandlerFormatMapping::LOG_LEVEL_MESSAGE_COLOR,
-        Logger::LogHandlerFormatMapping::LOG_MESSAGE
-    ));
-
-Logger::LogHandler* logfile_handler = new Logger::LogHandler(
-    "logfile", &Logger::log_file, Logger::TRACE,
-    fmt::format(
-        "{{{}}} {{{}:<8}} {:<60} {{{}}}\n",
-        Logger::LogHandlerFormatMapping::LOG_TIME,
-        Logger::LogHandlerFormatMapping::LOG_LEVEL_FULL_NAME,
-        fmt::format(
-            "{{{}}}({{{}}}:{{{}}})",
-            Logger::LogHandlerFormatMapping::LOG_SOURCE,
-            Logger::LogHandlerFormatMapping::LOG_FILENAME,
-            Logger::LogHandlerFormatMapping::LOG_LINENO
-        ),
-        Logger::LogHandlerFormatMapping::LOG_MESSAGE
-    ));
-
-vector<Logger::LogHandler*> Logger::handlers = { stdout_handler, logfile_handler };
-
+// 定义日志等级常量，必须在创建 LogHandler 之前初始化
 const Logger::LogLevel Logger::UNKNOWN = {
     Logger::LogLevelID::UNKNOWN, "UNKNOWN", "?",
     fg(color::blue) | bg(color::gray),
@@ -112,7 +83,6 @@ const Logger::LogLevel Logger::INFO = {
     fg(terminal_color::green) | bg(terminal_color::black),
 };
 
-
 const Logger::LogLevel Logger::WARN = {
     Logger::LogLevelID::WARN, "WARN", "W",
     fg(color::blue) | bg(terminal_color::black),
@@ -120,7 +90,6 @@ const Logger::LogLevel Logger::WARN = {
     fg(color::dark_gray) | bg(terminal_color::black),
     fg(terminal_color::yellow) | bg(terminal_color::black),
 };
-
 
 const Logger::LogLevel Logger::ERROR = {
     Logger::LogLevelID::ERROR, "ERROR", "E",
@@ -130,7 +99,6 @@ const Logger::LogLevel Logger::ERROR = {
     fg(terminal_color::red) | bg(terminal_color::black),
 };
 
-
 const Logger::LogLevel Logger::CRITICAL = {
     Logger::LogLevelID::CRITICAL, "CRITICAL", "C",
     fg(color::blue) | bg(terminal_color::black),
@@ -138,7 +106,6 @@ const Logger::LogLevel Logger::CRITICAL = {
     fg(color::dark_gray) | bg(terminal_color::black),
     fg(terminal_color::bright_red) | bg(terminal_color::black),
 };
-
 
 const Logger::LogLevel Logger::FATAL = {
     Logger::LogLevelID::FATAL, "FATAL", "F",
@@ -148,7 +115,6 @@ const Logger::LogLevel Logger::FATAL = {
     fg(terminal_color::magenta) | bg(terminal_color::black),
 };
 
-
 const Logger::LogLevel Logger::OFF = {
     Logger::LogLevelID::OFF, "OFF", "-",
     fg(color::blue) | bg(terminal_color::black),
@@ -156,7 +122,6 @@ const Logger::LogLevel Logger::OFF = {
     fg(color::dark_gray) | bg(terminal_color::black),
     fg(rgb(21, 255, 247)) | bg(terminal_color::black),
 };
-
 
 const Logger::LogLevel Logger::FORCE = {
     Logger::LogLevelID::FORCE, "FORCE", "!",
@@ -166,6 +131,37 @@ const Logger::LogLevel Logger::FORCE = {
     fg(color::white) | bg(terminal_color::black),
 };
 
+// 创建默认的处理器
+Logger::LogHandler* stdout_handler = new Logger::LogHandler(
+    "stdout", stdout, Logger::TRACE,
+    fmt::format(
+        "{}{{{}}}{} {{{}}} {}{{{}:<35}} {}{{{}}}\n",
+        Logger::LogHandlerFormatMapping::LOG_LEVEL_TIME_COLOR,
+        Logger::LogHandlerFormatMapping::LOG_TIME,
+        Logger::LogHandlerFormatMapping::LOG_LEVEL_COLOR,
+        Logger::LogHandlerFormatMapping::LOG_LEVEL_DISPLAY_NAME,
+        Logger::LogHandlerFormatMapping::LOG_LEVEL_SOURCE_COLOR,
+        Logger::LogHandlerFormatMapping::LOG_SOURCE,
+        Logger::LogHandlerFormatMapping::LOG_LEVEL_MESSAGE_COLOR,
+        Logger::LogHandlerFormatMapping::LOG_MESSAGE
+    ));
+
+Logger::LogHandler* logfile_handler = new Logger::LogHandler(
+    "logfile", &Logger::log_file, Logger::TRACE,
+    fmt::format(
+        "{{{}}} {{{}:<8}} {:<60} {{{}}}\n",
+        Logger::LogHandlerFormatMapping::LOG_TIME,
+        Logger::LogHandlerFormatMapping::LOG_LEVEL_FULL_NAME,
+        fmt::format(
+            "{{{}}}({{{}}}:{{{}}})",
+            Logger::LogHandlerFormatMapping::LOG_SOURCE,
+            Logger::LogHandlerFormatMapping::LOG_FILENAME,
+            Logger::LogHandlerFormatMapping::LOG_LINENO
+        ),
+        Logger::LogHandlerFormatMapping::LOG_MESSAGE
+    ));
+
+vector<Logger::LogHandler*> Logger::handlers = { stdout_handler, logfile_handler };
 
 
 Logger::LogLevel Logger::LogLevel::getLevelByID(int level_id) {
@@ -268,32 +264,27 @@ void Logger::initialize(size_t max_log_file_count) {
         initialized = true;
         LINFO("Logger::initialize", "日志记录器初始化成功");
 
-        // 启动异步日志线程
         if (use_async) {
             async_running = true;
             async_thread = thread([]() {
-                // 捕获外部的log_context变量
                 extern unordered_map<string, any> log_context;
                 while (async_running.load()) {
-                    vector<LogMessage*> batch;
-                    batch.reserve(batch_size);
-
-                    // 从队列中获取日志消息
+                    vector<LogMessage*> messages;
+                    messages.reserve(batch_size);
                     { 
                         unique_lock<mutex> lock(queue_mutex);
                         queue_cond.wait_for(lock, chrono::milliseconds(100), []() {
                             return !log_queue.empty() || !async_running.load();
                         });
 
-                        // 批量获取日志消息
-                        while (!log_queue.empty() && batch.size() < batch_size) {
-                            batch.push_back(log_queue.front());
+                        while (!log_queue.empty() && messages.size() < batch_size) {
+                            messages.push_back(log_queue.front());
                             log_queue.pop();
                         }
                     }
 
-                    // 处理批量日志消息
-                    for (const auto msg : batch) {
+
+                    for (const auto msg : messages) {
                         // 处理单条日志消息的逻辑（复制自log方法）
                         log_context[Logger::LogHandlerFormatMapping::LOG_TIME] = time_utils::get_formatted_time_with_frac(msg->timestamp, "%Y-%m-%d %H:%M:%S.%f", 3);
                         log_context[Logger::LogHandlerFormatMapping::LOG_TIMESTAMP] = msg->timestamp;
@@ -422,7 +413,7 @@ void Logger::initialize(size_t max_log_file_count) {
                     msg_pool.deallocate(msg);
                 }
 
-                LINFO("Logger", "异步日志线程已停止");
+                LINFO("Logger::setAsync", "异步日志线程已停止");
             });
         }
     } else {
@@ -446,11 +437,10 @@ void Logger::setAsync(bool async) {
     use_async = async;
     
     if (async) {
-        // 启动异步线程
+
         if (!async_running.load()) {
             async_running = true;
             async_thread = thread([]() {
-                // 捕获外部的log_context变量
                 extern unordered_map<string, any> log_context;
                 while (async_running.load()) {
                     vector<LogMessage*> batch;
@@ -600,7 +590,7 @@ void Logger::setAsync(bool async) {
                     msg_pool.deallocate(msg);
                 }
 
-                LINFO("Logger", "异步日志线程已停止");
+                LINFO("Logger::setAsync", "异步日志线程已停止");
             });
         }
     } else {
@@ -647,18 +637,6 @@ void Logger::setQueueMaxSize(size_t size) {
 }
 
 
-unordered_map<string, any> log_context = {
-    {Logger::LogHandlerFormatMapping::LOG_CUSTOM_COLOR, ""},
-    {Logger::LogHandlerFormatMapping::LOG_FUNCNAME, "<NotImplmented>"},
-#ifdef _WIN32
-    {Logger::LogHandlerFormatMapping::LOG_PROCESSID, GetCurrentProcessId()},
-#else
-    {Logger::LogHandlerFormatMapping::LOG_PROCESSID, getpid()},
-#endif
-    {Logger::LogHandlerFormatMapping::LOG_PROCESSNAME, "<NotImplmented>"},
-    {Logger::LogHandlerFormatMapping::LOG_THREADID, this_thread::get_id()},
-    {Logger::LogHandlerFormatMapping::LOG_THREADNAME, "<NotImplmented>"},
-};
 
 void Logger::log(
     const LogLevel& level,
@@ -809,4 +787,15 @@ void Logger::log_exc(
 };
 
 Logger::Initializer Logger::initializer;
+
+Logger::Initializer::~Initializer() {
+    try {
+        Logger::setAsync(false);
+    } catch (...) {}
+
+    if (Logger::log_file.is_open()) {
+        Logger::log_file.flush();
+        Logger::log_file.close();
+    }
+}
 

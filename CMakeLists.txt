@@ -108,24 +108,3 @@ target_link_libraries(
     setupapi
 )
 
-redefine_file_marco(${PROJECT_NAME})
-
-# Logger benchmark executable
-add_executable(logger_benchmark
-    logger_benchmark.cpp
-    src/utils/logger.cpp
-    src/utils/time_utils.cpp
-    src/utils/string_utils.cpp
-)
-
-target_include_directories(
-    logger_benchmark PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_link_libraries(
-    logger_benchmark PRIVATE
-    fmt::fmt
-)

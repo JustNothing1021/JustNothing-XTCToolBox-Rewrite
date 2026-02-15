@@ -16,6 +16,7 @@
 #include <iostream>
 #include <filesystem>
 #include <functional>
+#include <unordered_map>
 #include <queue>
 #include <atomic>
 #include <fmt/core.h>
@@ -71,7 +72,7 @@ namespace log_utils {
 
     // 可变参数格式化函数。
     // 这个函数不能放别的文件实现，因为模板在编译的时候就定好了
-    template<typename ...Args>
+    template <typename ...Args>
     std::string formatter(const std::string& fmt, Args ...args) {
         if constexpr (sizeof...(args) == 0) {
             return fmt;
@@ -83,7 +84,6 @@ namespace log_utils {
     class Logger {
 
     public:
-
         class LogLevelID {
             
         public:
@@ -103,7 +103,7 @@ namespace log_utils {
         class LogLevel {
 
         public:
-            int level_id;                               // 日志级别ID
+            int level_id;                                    // 日志级别ID
             std::string level_name;                          // 日志级别名称
             std::string display_name;                        // 日志级别显示名称
             fmt::v11::text_style time_display_color = fmt::fg(fmt::color::white);    // 日志时间部分显示颜色
@@ -331,6 +331,8 @@ namespace log_utils {
                 construct_time = time_utils::get_time();
                 Logger::initialize(Logger::log_file_max_count);
             }
+            // 析构函数，用于在程序退出时安全关闭异步线程和日志文件
+            ~Initializer();
         };
 
         static bool initialized; // 是否已初始化
@@ -589,6 +591,21 @@ namespace log_utils {
         };
 
 
+    };
+
+    // 每次日志记录的上下文。
+    // 需要在 Logger 定义后声明
+    inline std::unordered_map<std::string, std::any> log_context {
+        {Logger::LogHandlerFormatMapping::LOG_CUSTOM_COLOR, ""},
+        {Logger::LogHandlerFormatMapping::LOG_FUNCNAME, "<NotImplmented>"},
+    #ifdef _WIN32
+        {Logger::LogHandlerFormatMapping::LOG_PROCESSID, GetCurrentProcessId()},
+    #else
+        {Logger::LogHandlerFormatMapping::LOG_PROCESSID, getpid()},
+    #endif
+        {Logger::LogHandlerFormatMapping::LOG_PROCESSNAME, "<NotImplmented>"},
+        {Logger::LogHandlerFormatMapping::LOG_THREADID, std::this_thread::get_id()},
+        {Logger::LogHandlerFormatMapping::LOG_THREADNAME, "<NotImplmented>"}
     };
 }
 

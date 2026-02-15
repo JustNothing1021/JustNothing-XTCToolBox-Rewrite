@@ -58,18 +58,16 @@ vector<usb_utils::COMPortInfo> usb_utils::GetCOMPorts() {
                             endPos - comPos - 4);
                         try {
                             int portNum = stoi(comStr);
-                            if (portNum >= 1 && portNum <= 19) {
-                                // 提取设备名称（去掉COM端口部分）
-                                string deviceName = friendlyNameStr.substr(0, comPos);
+                            // 提取设备名称（去掉COM端口部分）
+                            string deviceName = friendlyNameStr.substr(0, comPos);
 
-                                // 去除尾部空格
-                                size_t lastChar = deviceName.find_last_not_of(" ");
-                                if (lastChar != string::npos) {
-                                    deviceName = deviceName.substr(0, lastChar + 1);
-                                }
-
-                                comPorts.push_back({ portNum, deviceName });
+                            // 去除尾部空格
+                            size_t lastChar = deviceName.find_last_not_of(" ");
+                            if (lastChar != string::npos) {
+                                deviceName = deviceName.substr(0, lastChar + 1);
                             }
+
+                            comPorts.push_back({ portNum, deviceName });
                         } catch (const exception&) {
                             // 忽略无法转换为数字的端口号然后输出警告信息
                             // LWARN(...);
